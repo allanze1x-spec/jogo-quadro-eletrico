@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>contato</title>
+<style>body{margin:0;background:#111;font-family:monospace}
+.grid{display:grid;grid-template-columns:1fr 1fr}
+.cell{position:relative;width:233px;height:264px;overflow:hidden;border:1px solid #333}
+.cell img{width:100%;height:auto;display:block}
+.cell canvas{position:absolute;left:0;top:0;width:100%;height:100%}
+.cell b{position:absolute;left:4px;top:2px;color:#0f0;font-size:13px;background:#000a;padding:1px 4px;z-index:3}
+</style>
+<div class="grid" id="g"></div>
+<script>
+const B={"botao-s0.png":{"x":0.21484375,"y":0.109375,"w":0.78515625,"h":0.890625,"bg":54},"botao-s1.png":{"x":0,"y":0.125,"w":1,"h":0.875,"bg":34},"botao-s2.png":{"x":0.1875,"y":0.1171875,"w":0.6796875,"h":0.828125,"bg":48},"contator.png":{"x":0.28515625,"y":0.16796875,"w":0.421875,"h":0.63671875,"bg":39},"disjuntor-2p.png":{"x":0.3359375,"y":0.12890625,"w":0.31640625,"h":0.62109375,"bg":50},"disjuntor-3p.png":{"x":0.328125,"y":0.171875,"w":0.38671875,"h":0.77734375,"bg":36},"lampada-amarela.png":{"x":0.19140625,"y":0.12890625,"w":0.5859375,"h":0.828125,"bg":53},"lampada-branca.png":{"x":0.21875,"y":0.140625,"w":0.55859375,"h":0.72265625,"bg":50},"lampada-verde.png":{"x":0.2421875,"y":0.20703125,"w":0.49609375,"h":0.73046875,"bg":44},"lampada-vermelha.png":{"x":0.25,"y":0.140625,"w":0.75,"h":0.7890625,"bg":48},"motor.png":{"x":0.0625,"y":0.1875,"w":0.90625,"h":0.64453125,"bg":6},"quadro.png":{"x":0.10546875,"y":0.0859375,"w":0.7890625,"h":0.88671875,"bg":19},"rele-termico.png":{"x":0.203125,"y":0.109375,"w":0.5859375,"h":0.8125,"bg":30}};
+const IDS=["botao-s0","botao-s1","botao-s2","contator","disjuntor-2p","disjuntor-3p","lampada-amarela","lampada-branca","lampada-verde","lampada-vermelha","motor","quadro","rele-termico"];
+const start=+(new URLSearchParams(location.search).get('i')||0);
+const g=document.getElementById('g');
+IDS.slice(start,start+4).forEach(id=>{
+  const b=B[id+'.png'];
+  const c=document.createElement('div');c.className='cell';
+  c.innerHTML='<b>'+id+'</b><img src="../assets/orig/'+id+'.png">';
+  const cv=document.createElement('canvas');cv.width=233;cv.height=233;
+  if(b){const x=cv.getContext('2d');x.strokeStyle='#ff2d2d';x.lineWidth=2;
+    x.strokeRect(b.x*233,b.y*233,b.w*233,b.h*233);}
+  c.appendChild(cv);g.appendChild(c);
+});
+</script>

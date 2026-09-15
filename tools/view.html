@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>viewport harness</title>
+<style>
+  html,body{margin:0;background:#20262c;overflow:hidden;height:100%}
+  #box{position:absolute;left:0;top:0;transform-origin:0 0}
+  iframe{border:0;display:block;background:#0d1218}
+</style>
+</head>
+<body>
+<div id="box"><iframe id="fr"></iframe></div>
+<script>
+  /* harness de layout: renderiza o jogo num viewport exato (media queries do
+     iframe respondem à largura/altura aqui) e permite reduzir para caber
+     na preview.  /tools/view.html?w=1440&h=900&scale=.32&tx=0&ty=0&page=index.html */
+  const q = new URLSearchParams(location.search);
+  const w = +(q.get('w') || 1440), h = +(q.get('h') || 900);
+  const scale = +(q.get('scale') || 1), tx = +(q.get('tx') || 0), ty = +(q.get('ty') || 0);
+  const fr = document.getElementById('fr');
+  fr.width = w; fr.height = h;
+  fr.src = q.get('page') || '/index.html';
+  document.getElementById('box').style.transform = `translate(${-tx * scale}px,${-ty * scale}px) scale(${scale})`;
+</script>
+</body>
+</html>

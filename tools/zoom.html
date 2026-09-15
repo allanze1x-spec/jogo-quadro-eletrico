@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>zoom</title>
+<style>
+  html,body{margin:0;background:#111;overflow:hidden}
+  #wrap{position:absolute;left:0;top:0;transform-origin:0 0}
+  img{display:block;image-rendering:auto}
+  .grid{position:absolute;inset:0;pointer-events:none;
+    background:
+      repeating-linear-gradient(to right,rgba(0,255,180,.18) 0 1px,transparent 1px 100px),
+      repeating-linear-gradient(to bottom,rgba(0,255,180,.18) 0 1px,transparent 1px 100px)}
+</style>
+</head>
+<body>
+<div id="wrap"><img id="im" src=""><div class="grid"></div></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const z = parseFloat(q.get('z') || '3');
+  const x = parseFloat(q.get('x') || '0');
+  const y = parseFloat(q.get('y') || '0');
+  const im = document.getElementById('im');
+  im.onload = () => {
+    document.getElementById('wrap').style.transform = `scale(${z}) translate(${-x}px,${-y}px)`;
+  };
+  im.src = q.get('img') || '../assets/esquema-1.jpg';
+</script>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1116">
+<title>Quadro Elétrico — Reversão de Rotação (Frente / Ré)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================ BIBLIOTECA DE ÍCONES ============================ -->
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.4 2.2 4.6 13.4h6.2l-.9 8.4 8.9-11.3h-6.3z"/></symbol>
+  <symbol id="i-schematic" viewBox="0 0 24 24"><rect x="3.2" y="3.2" width="6" height="6" rx="1.2"/><rect x="14.8" y="14.8" width="6" height="6" rx="1.2"/><path d="M6.2 9.2v5.3a2 2 0 0 0 2 2h3.2M9.2 6.2h8.6a2 2 0 0 1 2 2v6.6"/></symbol>
+  <symbol id="i-verify" viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/><path d="m7.8 10.9 2 2 3.6-4.1M15.6 15.6 20.6 20.6"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.2 17.6h5.6M10.4 20.6h3.2M12 3.2a6 6 0 0 1 3.4 10.9v1.5H8.6v-1.5A6 6 0 0 1 12 3.2z"/></symbol>
+  <symbol id="i-meter" viewBox="0 0 24 24"><rect x="3.2" y="4.2" width="17.6" height="15.6" rx="2.4"/><path d="M6.8 15.8 11 10.4l2.9 3.4 3.3-4.2M6.8 8.2h4.4"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v3.1M12 18.3v3.1M2.6 12h3.1M18.3 12h3.1M5.4 5.4l2.2 2.2M16.4 16.4l2.2 2.2M18.6 5.4l-2.2 2.2M7.6 16.4l-2.2 2.2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.4 5.4 18.6 12 8.4 18.6z"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M4.4 9.4h10.4a4.6 4.6 0 0 1 0 9.2H8.4"/><path d="M7.8 5.6 4 9.4l3.8 3.8"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.2" y="4.6" width="17.6" height="14.8" rx="2.4"/><path d="M14.6 4.6v14.8"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.4 6.4 17.6 17.6M17.6 6.4 6.4 17.6"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.2"/><circle cx="12" cy="12" r="2.4"/><path d="M12 1.6v3.6M12 18.8v3.6M1.6 12h3.6M18.8 12h3.6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4.4 12h13.2M12.6 6.6 18 12l-5.4 5.4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.4v13.2M5.4 12h13.2"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.4 12h13.2"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.6A1.6 1.6 0 0 1 5.6 4H9M15 4h3.4A1.6 1.6 0 0 1 20 5.6V9M20 15v3.4a1.6 1.6 0 0 1-1.6 1.6H15M9 20H5.6A1.6 1.6 0 0 1 4 18.4V15"/></symbol>
+  <symbol id="i-tray" viewBox="0 0 24 24"><path d="M3.4 13.6 6 5.6A1.6 1.6 0 0 1 7.5 4.5h9A1.6 1.6 0 0 1 18 5.6l2.6 8M3.4 13.6h17.2v4.2a1.6 1.6 0 0 1-1.6 1.6H5A1.6 1.6 0 0 1 3.4 17.8z"/><path d="M8.6 13.6V16h6.8v-2.4"/></symbol>
+</defs></svg>
+
+<!-- ============================== BARRA SUPERIOR ============================== -->
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"><svg class="ic"><use href="#i-bolt"/></svg></span>
+    <span class="brand-txt">
+      <strong>Quadro Elétrico</strong>
+      <small>Comando de motor trifásico com reversão — frente / ré</small>
+    </span>
+  </div>
+
+  <div class="hud">
+    <div class="hud-item">
+      <label>Etapa</label>
+      <strong id="hud-etapa">1 / 3 — Fixar componentes</strong>
+    </div>
+    <div class="hud-item">
+      <label id="hud-label-prog">Ligações</label>
+      <strong id="hud-progress">0 / 46</strong>
+      <span class="bar"><i id="hud-bar"></i></span>
+    </div>
+    <div class="hud-item">
+      <label>Pontos</label>
+      <strong id="hud-score">0</strong>
+    </div>
+    <div class="hud-item">
+      <label>Tempo</label>
+      <strong id="hud-time">00:00</strong>
+    </div>
+  </div>
+
+  <div class="tools">
+    <button id="btn-esquema" class="btn ghost" title="Ver o esquema elétrico de referência" aria-label="Esquema elétrico">
+      <svg class="ic"><use href="#i-schematic"/></svg><span>Esquema</span></button>
+    <button id="btn-verificar" class="btn ghost" title="Conferir a montagem / emitir laudo" aria-label="Verificar">
+      <svg class="ic"><use href="#i-verify"/></svg><span>Verificar</span></button>
+    <button id="btn-dica" class="btn ghost" title="Dica da ligação atual" aria-label="Dica">
+      <svg class="ic"><use href="#i-bulb"/></svg><span>Dica</span></button>
+    <button id="btn-meter" class="btn ghost" title="Multímetro: clique em dois bornes para medir" aria-label="Multímetro">
+      <svg class="ic"><use href="#i-meter"/></svg><span>Medir</span></button>
+    <button id="btn-manut" class="btn ghost" title="Modo manutenção: defeito escondido para diagnosticar" aria-label="Manutenção">
+      <svg class="ic"><use href="#i-gear"/></svg><span>Manutenção</span></button>
+    <button id="btn-livre" class="btn ghost" title="Modo livre: libera ligações fora do esquema" aria-label="Modo livre">
+      <svg class="ic"><use href="#i-panel"/></svg><span>Livre</span></button>
+    <button id="btn-auto" class="btn ghost" title="Montagem automática (demonstração)" aria-label="Montagem automática">
+      <svg class="ic"><use href="#i-play"/></svg><span>Auto</span></button>
+    <button id="btn-reset" class="btn danger" title="Recomeçar do zero" aria-label="Recomeçar">
+      <svg class="ic"><use href="#i-undo"/></svg><span>Recomeçar</span></button>
+    <button id="btn-panel" class="btn ghost only-narrow" title="Abrir/fechar painel" aria-label="Painel">
+      <svg class="ic"><use href="#i-panel"/></svg></button>
+  </div>
+</header>
+
+<!-- ================================ ÁREA DE TRABALHO ========================== -->
+<main class="workspace">
+
+  <section id="board-wrap">
+
+    <!-- objetivo do momento + atalho para achar os bornes no quadro -->
+    <div id="objective" class="objective">
+      <span class="obj-step">
+        <b id="obj-etapa">Etapa 1</b><i id="obj-count">0 / 18</i>
+      </span>
+      <p id="obj-text">Arraste cada componente da caixa para o contorno tracejado na placa.</p>
+      <button id="obj-locate" class="btn ghost tiny" title="Dar zoom nos bornes desta ligação" aria-label="Localizar no quadro">
+        <svg class="ic"><use href="#i-target"/></svg><span>Localizar</span></button>
+    </div>
+
+    <div id="board" class="board">
+      <div id="stage" class="stage">
+        <div id="paint" class="layer-paint"></div>
+        <div id="ghosts" class="layer-ghosts"></div>
+        <div id="parts" class="layer-parts"></div>
+        <svg id="wires" class="layer-wires" viewBox="0 0 1700 1290" preserveAspectRatio="none"></svg>
+        <div id="terms" class="layer-terms"></div>
+        <div id="fx" class="layer-fx"></div>
+      </div>
+    </div>
+
+    <div id="zoom" class="zoombar">
+      <button data-zoom="-1" aria-label="Reduzir"><svg class="ic"><use href="#i-minus"/></svg></button>
+      <span id="zoom-val">100%</span>
+      <button data-zoom="1" aria-label="Ampliar"><svg class="ic"><use href="#i-plus"/></svg></button>
+      <button data-zoom="0" aria-label="Ajustar à tela"><svg class="ic"><use href="#i-fit"/></svg></button>
+    </div>
+
+    <div id="meter" class="meter hidden">
+      <div class="meter-head">
+        <svg class="ic"><use href="#i-meter"/></svg><b>Multímetro</b>
+        <span>V ~ / continuidade</span>
+        <button id="meter-x" aria-label="Fechar multímetro"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="meter-body">
+        <div class="meter-display"><span id="meter-val">— — —</span><small id="meter-unit"></small></div>
+        <div class="meter-probes">
+          <span class="probe a">A <b id="meter-a">—</b></span>
+          <span class="probe b">B <b id="meter-b">—</b></span>
+        </div>
+        <p id="meter-txt">Clique em dois bornes da placa para medir.</p>
+      </div>
+    </div>
+
+    <div id="coach" class="coach hidden">
+      <svg class="ic coach-ic"><use href="#i-arrow"/></svg>
+      <div class="coach-text"><strong id="coach-title">Missão</strong><span id="coach-desc"></span></div>
+      <button id="coach-x" aria-label="Fechar aviso"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+
+    <div id="tray" class="tray">
+      <div class="tray-head">
+        <svg class="ic"><use href="#i-tray"/></svg>
+        <strong>Caixa de componentes</strong>
+        <span id="tray-hint">Arraste cada peça para o contorno tracejado da placa</span>
+        <span id="tray-count" class="counter">0 / 18</span>
+        <button id="btn-pular" class="btn ghost small">Pular etapa</button>
+      </div>
+      <div id="tray-items" class="tray-items"></div>
+    </div>
+  </section>
+
+  <!-- ================================== PAINEL ================================= -->
+  <aside id="sidebar">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="tarefas" role="tab">Tarefas <b id="tab-badge" class="badge hidden">!</b></button>
+      <button class="tab" data-tab="bancada" role="tab">Bancada</button>
+      <button class="tab" data-tab="ajuda" role="tab">Como jogar</button>
+    </div>
+
+    <div class="tabbody" id="tab-tarefas">
+      <div id="pane-head" class="pane-head">
+        <div class="pane-title">
+          <strong id="pane-title">Etapa 1 — Fixar componentes</strong>
+          <span id="pane-count">0 / 18</span>
+        </div>
+        <span class="bar big"><i id="pane-bar"></i></span>
+        <p id="pane-sub" class="pane-sub">Arraste os componentes da caixa para os contornos da placa.</p>
+      </div>
+      <div id="mission-list" class="missions"></div>
+      <div id="test-list" class="missions hidden"></div>
+    </div>
+
+    <div class="tabbody hidden" id="tab-bancada">
+      <div class="statcard">
+        <h4>Motor M1</h4>
+        <div class="motorbox">
+          <svg id="motor-svg" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" class="m-ring"/>
+            <g id="motor-rotor">
+              <path d="M60 20 L74 46 L46 46 Z" class="m-arrow"/>
+              <path d="M60 100 L46 74 L74 74 Z" class="m-arrow"/>
+            </g>
+            <text x="60" y="66" id="motor-txt" text-anchor="middle" class="m-txt">OFF</text>
+          </svg>
+          <div class="motorinfo">
+            <div class="motorline"><span>Situação</span><strong id="st-motor">Motor parado</strong></div>
+            <div class="motorline"><span>Rotação</span><strong id="st-rot">—</strong></div>
+            <div class="motorline"><span>Rede</span><strong id="ro-voltage2">0 V</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="statcard">
+        <h4>Contatores e proteção</h4>
+        <div class="motorline"><span>K1 — frente</span><strong id="st-k1" class="pill off">desligado</strong></div>
+        <div class="motorline"><span>K2 — ré</span><strong id="st-k2" class="pill off">desligado</strong></div>
+        <div class="motorline"><span>F1 — relé térmico</span><strong id="st-f1" class="pill ok">normal</strong></div>
+      </div>
+
+      <div class="statcard">
+        <h4>Sinalização</h4>
+        <div id="st-lamps" class="lamps"></div>
+      </div>
+
+      <div class="statcard">
+        <h4>Ocorrências</h4>
+        <div id="st-log" class="log"></div>
+      </div>
+    </div>
+
+    <div class="tabbody hidden" id="tab-ajuda">
+      <ol class="help">
+        <li><b>Etapa 1 — Fixação:</b> arraste os componentes da caixa para os contornos tracejados na placa.</li>
+        <li><b>Etapa 2 — Ligação:</b> clique num borne e depois no outro para passar o cabo. A cor segue o
+            potencial elétrico (L1 vermelho, L2 preto, L3 azul, neutro cinza) e onde chegam dois ou mais cabos
+            aparece o <b>ponto de junção</b>, como no esquema.</li>
+        <li>A lista de <b>tarefas</b> segue a ordem do esquema elétrico: primeiro o circuito de
+            <b>potência</b>, depois o de <b>comando</b> e por fim a <b>sinalização</b>.</li>
+        <li><b>Etapa 3 — Teste:</b> com a montagem pronta, repita a sequência de funcionamento
+            (energizar, frente, parada, ré, sobrecarga, rearme). Cada passo é conferido na bancada.</li>
+        <li>Na bancada, <b>Q1</b> e <b>Q2</b> alimentam o quadro, <b>S1</b> (frente), <b>S2</b> (ré) e
+            <b>S0</b> (parada). Atalhos de teclado: <b>1</b>, <b>2</b> e <b>0</b>.</li>
+        <li>Se o relé térmico atuar (carga em <b>Sobrecarga</b>), rearme no botão <b>F1</b> e a lâmpada
+            vermelha de falha apaga.</li>
+        <li>Montar <b>sem o intertravamento</b> (contatos NF 11-12 cruzados) faz K1 e K2 fecharem juntos e
+            provoca <b>curto-circuito</b> — dá para experimentar no modo livre.</li>
+      </ol>
+
+      <h4 class="helph4">Multímetro</h4>
+      <p class="tiny">Ligue <b>Medir</b> e clique em dois bornes: o medidor mostra a tensão entre eles
+         (220 V fase-neutro, 380 V entre fases) e apita quando os dois pontos são o <b>mesmo</b> ponto
+         elétrico (continuidade). Com Q1 e Q2 desligados, a continuidade é o jeito mais rápido de achar
+         fio rompido ou cabo faltando.</p>
+
+      <h4 class="helph4">Modo manutenção</h4>
+      <p class="tiny">O botão <b>Manutenção</b> entrega o quadro montado com um <b>defeito escondido</b> e
+         uma ordem de serviço. A lista de tarefas vira o relato do operador: você reproduz o sintoma na
+         bancada, mede com o multímetro e conserta. Para tirar um cabo errado, <b>clique nele</b> na placa
+         e ele é cortado; depois refaça a ligação correta. A O.S. encerra quando a fiação volta a bater
+         com o esquema.</p>
+
+      <h4 class="helph4">Navegação do quadro</h4>
+      <p class="tiny">Roda do mouse dá <b>zoom</b>, arrastar o fundo <b>move</b> a placa e o botão
+         <b>Localizar</b> aproxima os bornes da ligação atual. No celular, use os botões de zoom e
+         arraste para percorrer o quadro.</p>
+    </div>
+  </aside>
+</main>
+
+<!-- ================================== BANCADA ================================= -->
+<footer id="dock">
+  <div class="dock-group">
+    <span class="dock-title">Alimentação</span>
+    <button id="ctl-q1" class="key">Q1 <b>OFF</b></button>
+    <button id="ctl-q2" class="key">Q2 <b>OFF</b></button>
+  </div>
+
+  <div class="dock-group">
+    <span class="dock-title">Comando</span>
+    <button id="ctl-s1" class="pbtn green">S1<b>FRENTE</b></button>
+    <button id="ctl-s2" class="pbtn dark">S2<b>RÉ</b></button>
+    <button id="ctl-s0" class="pbtn red">S0<b>PARADA</b></button>
+  </div>
+
+  <div class="dock-group">
+    <span class="dock-title">Proteção</span>
+    <button id="ctl-f1" class="key">F1 <b>REARMAR</b></button>
+    <select id="ctl-load" title="Carga do motor">
+      <option value="sem">Sem carga</option>
+      <option value="nominal" selected>Carga nominal</option>
+      <option value="sobrecarga">Sobrecarga ⚠</option>
+    </select>
+  </div>
+
+  <div class="dock-group readout-group">
+    <span class="dock-title">Leitura</span>
+    <div class="readout">
+      <span id="ro-voltage" class="ro">Tensão no comando: <b>0 V</b></span>
+      <span id="ro-msg" class="ro msg">Ligue Q1 e Q2 para energizar o quadro.</span>
+    </div>
+  </div>
+</footer>
+
+<!-- ==================================== MODAL ================================= -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="modal-title"></h2>
+      <button class="modal-x" id="modal-x" aria-label="Fechar"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="flash" class="flash"></div>
+
+<script src="js/data.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

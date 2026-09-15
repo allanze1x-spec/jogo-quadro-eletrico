@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>final</title>
+<style>body{margin:0;background:#9aa3ad;font-family:monospace}
+.grid{display:grid;grid-template-columns:1fr 1fr}
+.cell{width:233px;height:233px;position:relative;display:grid;place-items:center;border:1px solid #667;
+ background:conic-gradient(#c9ced4 0 25%,#e6e9ec 0 50%,#c9ced4 0 75%,#e6e9ec 0) 0 0/22px 22px}
+.cell img{max-width:96%;max-height:96%}
+.cell b{position:absolute;left:3px;top:1px;color:#000;font-size:12px;background:#fff9;padding:0 3px;z-index:3}
+</style><div class="grid" id="g"></div>
+<script>
+const IDS=["botao-s0","botao-s1","botao-s2","contator","disjuntor-2p","disjuntor-3p","lampada-amarela","lampada-branca","lampada-verde","lampada-vermelha","motor","quadro","rele-termico"];
+const start=+(new URLSearchParams(location.search).get('i')||0);
+const g=document.getElementById('g');
+IDS.slice(start,start+4).forEach(id=>{
+  const c=document.createElement('div');c.className='cell';
+  c.innerHTML='<b>'+id+'</b><img src="../assets/'+id+'.png">';
+  g.appendChild(c);
+});
+</script>
