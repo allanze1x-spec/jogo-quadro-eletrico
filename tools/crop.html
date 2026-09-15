@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>crop</title>
+<style>
+  html,body{margin:0;background:#101014;color:#8ff;font:11px ui-monospace,monospace}
+  #bar{padding:4px 6px}
+  canvas{display:block;image-rendering:auto}
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<canvas id="cv"></canvas>
+<script>
+  const q = new URLSearchParams(location.search);
+  const img = q.get('img') || 'esquema-1.jpg';
+  const X = +(q.get('x') || 0), Y = +(q.get('y') || 0);
+  const W = +(q.get('w') || 600), H = +(q.get('h') || 400);
+  const Z = +(q.get('z') || 1.6);
+  const cv = document.getElementById('cv');
+  const im = new Image();
+  im.onload = () => {
+    cv.width = Math.round(W * Z); cv.height = Math.round(H * Z);
+    const g = cv.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(im, X, Y, W, H, 0, 0, cv.width, cv.height);
+    g.font = '9px ui-monospace,monospace';
+    const step = 50;
+    g.lineWidth = 1;
+    for (let x = Math.ceil(X / step) * step; x < X + W; x += step) {
+      const px = (x - X) * Z;
+      g.strokeStyle = 'rgba(255,0,140,.35)';
+      g.beginPath(); g.moveTo(px + .5, 0); g.lineTo(px + .5, cv.height); g.stroke();
+      g.fillStyle = '#c09'; g.fillText(x, px + 2, 9);
+    }
+    for (let y = Math.ceil(Y / step) * step; y < Y + H; y += step) {
+      const py = (y - Y) * Z;
+      g.strokeStyle = 'rgba(0,140,255,.35)';
+      g.beginPath(); g.moveTo(0, py + .5); g.lineTo(cv.width, py + .5); g.stroke();
+      g.fillStyle = '#07c'; g.fillText(y, 2, py + 10);
+    }
+    document.getElementById('bar').textContent =
+      `${img}  x${X} y${Y} w${W} h${H} z${Z}  (orig ${im.naturalWidth}x${im.naturalHeight})`;
+  };
+  im.src = '../assets/' + img;
+</script>
+</body>
+</html>

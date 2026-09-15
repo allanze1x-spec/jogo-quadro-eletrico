@@ -46,7 +46,7 @@
     </div>
     <div class="hud-item">
       <label id="hud-label-prog">Ligações</label>
-      <strong id="hud-progress">0 / 46</strong>
+      <strong id="hud-progress">0 / 48</strong>
       <span class="bar"><i id="hud-bar"></i></span>
     </div>
     <div class="hud-item">
@@ -211,7 +211,7 @@
       <ol class="help">
         <li><b>Etapa 1 — Fixação:</b> arraste os componentes da caixa para os contornos tracejados na placa.</li>
         <li><b>Etapa 2 — Ligação:</b> clique num borne e depois no outro para passar o cabo. A cor segue o
-            potencial elétrico (L1 vermelho, L2 preto, L3 azul, neutro cinza) e onde chegam dois ou mais cabos
+            potencial elétrico (L1 vermelho, L2 preto, L3 azul) e onde chegam dois ou mais cabos
             aparece o <b>ponto de junção</b>, como no esquema.</li>
         <li>A lista de <b>tarefas</b> segue a ordem do esquema elétrico: primeiro o circuito de
             <b>potência</b>, depois o de <b>comando</b> e por fim a <b>sinalização</b>.</li>
@@ -220,14 +220,18 @@
         <li>Na bancada, <b>Q1</b> e <b>Q2</b> alimentam o quadro, <b>S1</b> (frente), <b>S2</b> (ré) e
             <b>S0</b> (parada). Atalhos de teclado: <b>1</b>, <b>2</b> e <b>0</b>.</li>
         <li>Se o relé térmico atuar (carga em <b>Sobrecarga</b>), rearme no botão <b>F1</b> e a lâmpada
-            vermelha de falha apaga.</li>
+            <b>AM SC</b> de falha apaga. Com o motor parado fica acesa a <b>VM MD</b>; em cada marcha
+            acende a verde correspondente (<b>VD ML</b> frente, <b>VD 2R</b> ré).</li>
+        <li>O <b>retorno</b> do comando não é neutro: o Q2 é bipolar, o polo 2 leva a fase L2 ao comando e
+            o polo 1 devolve tudo pela <b>barra de retorno</b> (fase L1) — por isso o comando trabalha em
+            <b>380 V</b>, como no esquema.</li>
         <li>Montar <b>sem o intertravamento</b> (contatos NF 11-12 cruzados) faz K1 e K2 fecharem juntos e
             provoca <b>curto-circuito</b> — dá para experimentar no modo livre.</li>
       </ol>
 
       <h4 class="helph4">Multímetro</h4>
       <p class="tiny">Ligue <b>Medir</b> e clique em dois bornes: o medidor mostra a tensão entre eles
-         (220 V fase-neutro, 380 V entre fases) e apita quando os dois pontos são o <b>mesmo</b> ponto
+         (380 V entre fases) e apita quando os dois pontos são o <b>mesmo</b> ponto
          elétrico (continuidade). Com Q1 e Q2 desligados, a continuidade é o jeito mais rápido de achar
          fio rompido ou cabo faltando.</p>
 

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>peek</title>
+<style>
+  html,body{margin:0;background:#0b0f14}
+  #win{overflow:hidden;position:relative}
+  iframe{border:0;position:absolute;transform-origin:0 0;background:#0b0f14}
+</style>
+</head>
+<body>
+<div id="win"></div>
+<script>
+  /* peek.html?w=1600&h=1000            → viewport do jogo (media queries)
+                &z=0.5                   → zoom desta página
+                &x=0&y=0                 → deslocamento desta página (px do jogo)
+                &auto=1                  → monta o quadro automaticamente (botão Auto)
+                &gz=0.6&gx=850&gy=700    → câmera do PALCO (unidades do palco) */
+  const q = new URLSearchParams(location.search);
+  const W = +(q.get('w') || 1600), H = +(q.get('h') || 1000);
+  const X = +(q.get('x') || 0), Y = +(q.get('y') || 0), Z = +(q.get('z') || 1);
+  const GZ = +(q.get('gz') || 0), GX = +(q.get('gx') || 0), GY = +(q.get('gy') || 0);
+  const AUTO = q.get('auto') === '1';
+  const win = document.getElementById('win');
+  win.style.width = window.innerWidth + 'px';
+  win.style.height = window.innerHeight + 'px';
+  const f = document.createElement('iframe');
+  f.style.width = W + 'px'; f.style.height = H + 'px';
+  f.style.transform = `scale(${Z})`;
+  f.style.left = (-X * Z) + 'px';
+  f.style.top = (-Y * Z) + 'px';
+  f.src = '/index.html';
+  win.appendChild(f);
+
+  const w = () => f.contentWindow;
+  const camera = () => {
+    try {
+      if (GZ) w().eval(`const _s=STAGE;VIEW.z=${GZ};VIEW.tx=(_s.w/2-${GX})*${GZ};VIEW.ty=(_s.h/2-${GY})*${GZ};applyView();`);
+      document.title = 'peek ok';
+    } catch (e) { document.title = 'peek erro: ' + e.message; }
+  };
+  f.addEventListener('load', () => {
+    setTimeout(() => {
+      try {
+        if (AUTO) {
+          const b = f.contentDocument.querySelector('#btn-auto');
+          if (b) b.click();
+        }
+      } catch (e) { document.title = 'peek erro: ' + e.message; }
+      camera();
+      // o jogo reajusta o enquadramento quando a bandeja/aba muda: reaplica depois
+      [250, 700, 1500].forEach(t => setTimeout(camera, t));
+    }, 350);
+  });
+</script>
+</body>
+</html>

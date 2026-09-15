@@ -1,6 +1,13 @@
 /* ============================================================================
    QUADRO ELÉTRICO — Comando de motor trifásico com reversão (Frente / Ré)
    data.js — definição dos componentes, terminais e das ligações do esquema
+
+   Este arquivo segue LITERALMENTE o esquema elétrico de referência:
+   · a rede entra só com L1, L2 e L3 (NÃO existe neutro no esquema);
+   · o Q2 é bipolar: o polo 1 (1-2) é o RETORNO do comando (vem de L1) e o
+     polo 2 (3-4) é a FASE do comando e da sinalização (vem de L2);
+   · na ré as fases trocam na SAÍDA do K2 (2→F1:5 e 6→F1:1);
+   · cada lâmpada de sinalização tem o seu próprio contato auxiliar.
    ========================================================================== */
 
 const STAGE = { w: 1700, h: 1290 };
@@ -12,13 +19,12 @@ const STAGE = { w: 1700, h: 1290 };
 --------------------------------------------------------------------------- */
 const PARTS = [
   {
-    id: 'ENT', name: 'Borneira de entrada', note: 'L1 · L2 · L3 · N', sub: 'rede',
+    id: 'ENT', name: 'Borneira de entrada', note: 'L1 · L2 · L3', sub: 'rede',
     kind: 'strip', x: 40, y: 60, w: 150, h: 300,
     terms: [
-      { id: 'L1', x: 190, y: 100, dir: 'right', label: 'L1' },
-      { id: 'L2', x: 190, y: 165, dir: 'right', label: 'L2' },
-      { id: 'L3', x: 190, y: 230, dir: 'right', label: 'L3' },
-      { id: 'N', x: 190, y: 295, dir: 'right', label: 'N' },
+      { id: 'L1', x: 190, y: 110, dir: 'right', label: 'L1' },
+      { id: 'L2', x: 190, y: 180, dir: 'right', label: 'L2' },
+      { id: 'L3', x: 190, y: 250, dir: 'right', label: 'L3' },
     ],
   },
   {
@@ -45,16 +51,23 @@ const PARTS = [
       { id: '6', x: 305, y: 612, dir: 'down', label: '6' },
       { id: 'A1', x: 200, y: 686, dir: 'down', label: 'A1', small: true },
       { id: 'A2', x: 320, y: 686, dir: 'down', label: 'A2', small: true },
-      { id: '13', x: 424, y: 446, dir: 'right', label: '13', small: true },
-      { id: '14', x: 424, y: 480, dir: 'right', label: '14', small: true },
-      { id: '11', x: 424, y: 514, dir: 'right', label: '11', small: true },
-      { id: '12', x: 424, y: 548, dir: 'right', label: '12', small: true },
-      { id: '23', x: 424, y: 582, dir: 'right', label: '23', small: true },
-      { id: '24', x: 424, y: 616, dir: 'right', label: '24', small: true },
+      // 13-14 = NA da auto-retenção · 11-12 = NF do intertravamento
+      // 21-22 = NF da sinalização (lâmpada com tudo desligado) · 23-24 = NA da sinalização
+      { id: '13', x: 424, y: 430, dir: 'right', label: '13', small: true },
+      { id: '14', x: 424, y: 462, dir: 'right', label: '14', small: true },
+      { id: '11', x: 424, y: 494, dir: 'right', label: '11', small: true },
+      { id: '12', x: 424, y: 526, dir: 'right', label: '12', small: true },
+      { id: '21', x: 424, y: 558, dir: 'right', label: '21', small: true },
+      { id: '22', x: 424, y: 590, dir: 'right', label: '22', small: true },
+      { id: '23', x: 424, y: 622, dir: 'right', label: '23', small: true },
+      { id: '24', x: 424, y: 654, dir: 'right', label: '24', small: true },
+      // 4º polo do contator (7-8): existe no desenho do esquema, mas não é usado
+      { id: '7', x: 350, y: 430, dir: 'right', label: '7', small: true },
+      { id: '8', x: 350, y: 585, dir: 'right', label: '8', small: true },
     ],
   },
   {
-    id: 'K1x', name: 'Bloco auxiliar K1', kind: 'aux', x: 380, y: 430, w: 80, h: 220, terms: [],
+    id: 'K1x', name: 'Bloco auxiliar K1', kind: 'aux', x: 380, y: 415, w: 80, h: 260, terms: [],
   },
   {
     id: 'K2', name: 'K2 — Contator (ré)', sub: 'ré', img: 'assets/contator.png',
@@ -68,81 +81,90 @@ const PARTS = [
       { id: '6', x: 655, y: 612, dir: 'down', label: '6' },
       { id: 'A1', x: 550, y: 686, dir: 'down', label: 'A1', small: true },
       { id: 'A2', x: 670, y: 686, dir: 'down', label: 'A2', small: true },
-      { id: '13', x: 774, y: 446, dir: 'right', label: '13', small: true },
-      { id: '14', x: 774, y: 480, dir: 'right', label: '14', small: true },
-      { id: '11', x: 774, y: 514, dir: 'right', label: '11', small: true },
-      { id: '12', x: 774, y: 548, dir: 'right', label: '12', small: true },
-      { id: '23', x: 774, y: 582, dir: 'right', label: '23', small: true },
-      { id: '24', x: 774, y: 616, dir: 'right', label: '24', small: true },
+      { id: '13', x: 774, y: 430, dir: 'right', label: '13', small: true },
+      { id: '14', x: 774, y: 462, dir: 'right', label: '14', small: true },
+      { id: '11', x: 774, y: 494, dir: 'right', label: '11', small: true },
+      { id: '12', x: 774, y: 526, dir: 'right', label: '12', small: true },
+      { id: '21', x: 774, y: 558, dir: 'right', label: '21', small: true },
+      { id: '22', x: 774, y: 590, dir: 'right', label: '22', small: true },
+      { id: '23', x: 774, y: 622, dir: 'right', label: '23', small: true },
+      { id: '24', x: 774, y: 654, dir: 'right', label: '24', small: true },
+      // 4º polo do contator (7-8): livre, como no esquema
+      { id: '7', x: 700, y: 430, dir: 'right', label: '7', small: true },
+      { id: '8', x: 700, y: 585, dir: 'right', label: '8', small: true },
     ],
   },
   {
-    id: 'K2x', name: 'Bloco auxiliar K2', kind: 'aux', x: 730, y: 430, w: 80, h: 220, terms: [],
+    id: 'K2x', name: 'Bloco auxiliar K2', kind: 'aux', x: 730, y: 415, w: 80, h: 260, terms: [],
   },
   {
+    /* F1 fica na coluna de potência, logo abaixo do K1 — como no esquema */
     id: 'F1', name: 'F1 — Relé térmico 95-96 / 97-98', sub: '95-98', img: 'assets/rele-termico.png',
-    x: 720, y: 700, w: 180, h: 249,
+    x: 150, y: 760, w: 180, h: 249,
     terms: [
-      { id: '1', x: 768, y: 694, dir: 'up', label: '1' },
-      { id: '3', x: 805, y: 694, dir: 'up', label: '3' },
-      { id: '5', x: 842, y: 694, dir: 'up', label: '5' },
-      { id: '2', x: 768, y: 900, dir: 'down', label: '2' },
-      { id: '4', x: 805, y: 900, dir: 'down', label: '4' },
-      { id: '6', x: 842, y: 900, dir: 'down', label: '6' },
-      { id: '95', x: 955, y: 722, dir: 'right', label: '95', small: true },
-      { id: '96', x: 955, y: 762, dir: 'right', label: '96', small: true },
-      { id: '97', x: 955, y: 806, dir: 'right', label: '97', small: true },
-      { id: '98', x: 955, y: 846, dir: 'right', label: '98', small: true },
+      { id: '1', x: 198, y: 754, dir: 'up', label: '1' },
+      { id: '3', x: 235, y: 754, dir: 'up', label: '3' },
+      { id: '5', x: 272, y: 754, dir: 'up', label: '5' },
+      { id: '2', x: 198, y: 960, dir: 'down', label: '2' },
+      { id: '4', x: 235, y: 960, dir: 'down', label: '4' },
+      { id: '6', x: 272, y: 960, dir: 'down', label: '6' },
+      { id: '95', x: 385, y: 782, dir: 'right', label: '95', small: true },
+      { id: '96', x: 385, y: 822, dir: 'right', label: '96', small: true },
+      { id: '97', x: 385, y: 866, dir: 'right', label: '97', small: true },
+      { id: '98', x: 385, y: 906, dir: 'right', label: '98', small: true },
     ],
   },
   {
-    id: 'F1x', name: 'Auxiliares do relé térmico', kind: 'aux', x: 910, y: 700, w: 85, h: 160, terms: [],
+    id: 'F1x', name: 'Auxiliares do relé térmico', kind: 'aux', x: 340, y: 760, w: 85, h: 160, terms: [],
   },
   {
+    /* o motor pendura no F1, no pé da coluna de potência (canto inferior esquerdo) */
     id: 'M1', name: 'M1 — Motor trifásico (M3~)', sub: 'M3 ~', img: 'assets/motor.png',
-    x: 730, y: 970, w: 270, h: 193,
+    x: 105, y: 1020, w: 270, h: 193,
     terms: [
-      { id: 'U', x: 775, y: 962, dir: 'up', label: 'U' },
-      { id: 'V', x: 838, y: 962, dir: 'up', label: 'V' },
-      { id: 'W', x: 901, y: 962, dir: 'up', label: 'W' },
+      { id: 'U', x: 150, y: 1012, dir: 'up', label: 'U' },
+      { id: 'V', x: 213, y: 1012, dir: 'up', label: 'V' },
+      { id: 'W', x: 276, y: 1012, dir: 'up', label: 'W' },
     ],
   },
   {
-    id: 'Q2', name: 'Q2 — Disjuntor do comando', sub: 'comando', img: 'assets/disjuntor-2p.png',
-    x: 1130, y: 70, w: 105, h: 204,
+    /* Q2 abre a coluna de comando; a saída 2 (polo 1) desce reta até a barra
+       de retorno, igual ao fio que desce do 2 do Q2 no esquema */
+    id: 'Q2', name: 'Q2 — Disjuntor do comando (2 polos)', sub: 'comando', img: 'assets/disjuntor-2p.png',
+    x: 700, y: 200, w: 105, h: 204,
     terms: [
-      { id: '1', x: 1155, y: 64, dir: 'up', label: '1' },
-      { id: '3', x: 1210, y: 64, dir: 'up', label: '3' },
-      { id: '2', x: 1155, y: 226, dir: 'down', label: '2' },
-      { id: '4', x: 1210, y: 226, dir: 'down', label: '4' },
+      { id: '1', x: 725, y: 194, dir: 'up', label: '1' },
+      { id: '3', x: 780, y: 194, dir: 'up', label: '3' },
+      { id: '2', x: 725, y: 356, dir: 'down', label: '2' },
+      { id: '4', x: 780, y: 356, dir: 'down', label: '4' },
     ],
   },
   {
     id: 'S0', name: 'S0 — Botão de parada (NF)', sub: 'NF parada', img: 'assets/botao-s0.png',
-    x: 1120, y: 300, w: 120, h: 130, button: 'S0',
+    x: 880, y: 440, w: 120, h: 130, button: 'S0',
     terms: [
-      { id: '11', x: 1148, y: 440, dir: 'down', label: '11' },
-      { id: '12', x: 1188, y: 440, dir: 'down', label: '12' },
+      { id: '11', x: 908, y: 580, dir: 'down', label: '11' },
+      { id: '12', x: 948, y: 580, dir: 'down', label: '12' },
     ],
   },
   {
     id: 'S1', name: 'S1 — Botão frente (NA)', sub: 'NA frente', img: 'assets/botao-s1.png',
-    x: 990, y: 480, w: 120, h: 130, button: 'S1',
+    x: 760, y: 700, w: 120, h: 130, button: 'S1',
     terms: [
-      { id: '13', x: 1018, y: 620, dir: 'down', label: '13' },
-      { id: '14', x: 1058, y: 620, dir: 'down', label: '14' },
+      { id: '13', x: 788, y: 840, dir: 'down', label: '13' },
+      { id: '14', x: 828, y: 840, dir: 'down', label: '14' },
     ],
   },
   {
     id: 'S2', name: 'S2 — Botão ré (NA)', sub: 'NA ré', img: 'assets/botao-s2.png',
-    x: 1230, y: 480, w: 120, h: 130, button: 'S2',
+    x: 1000, y: 700, w: 120, h: 130, button: 'S2',
     terms: [
-      { id: '13', x: 1258, y: 620, dir: 'down', label: '13' },
-      { id: '14', x: 1298, y: 620, dir: 'down', label: '14' },
+      { id: '13', x: 1028, y: 840, dir: 'down', label: '13' },
+      { id: '14', x: 1068, y: 840, dir: 'down', label: '14' },
     ],
   },
   {
-    id: 'H1', name: 'H1 — Lâmpada alimentação', sub: 'alimentação', img: 'assets/lampada-branca.png',
+    id: 'H1', name: 'H1 — Lâmpada AM SC (amarela)', sub: 'falha', img: 'assets/lampada-amarela.png',
     x: 1240, y: 690, w: 110, h: 140, lamp: 'H1',
     terms: [
       { id: 'X1', x: 1265, y: 840, dir: 'down', label: 'X1', small: true },
@@ -150,7 +172,7 @@ const PARTS = [
     ],
   },
   {
-    id: 'H2', name: 'H2 — Lâmpada frente (verde)', sub: 'frente', img: 'assets/lampada-verde.png',
+    id: 'H2', name: 'H2 — Lâmpada VM MD (vermelha)', sub: 'motor parado', img: 'assets/lampada-vermelha.png',
     x: 1350, y: 690, w: 110, h: 140, lamp: 'H2',
     terms: [
       { id: 'X1', x: 1375, y: 840, dir: 'down', label: 'X1', small: true },
@@ -158,7 +180,7 @@ const PARTS = [
     ],
   },
   {
-    id: 'H3', name: 'H3 — Lâmpada ré (amarela)', sub: 'ré', img: 'assets/lampada-amarela.png',
+    id: 'H3', name: 'H3 — Lâmpada VD ML (verde)', sub: 'marcha frente', img: 'assets/lampada-verde.png',
     x: 1460, y: 690, w: 110, h: 140, lamp: 'H3',
     terms: [
       { id: 'X1', x: 1485, y: 840, dir: 'down', label: 'X1', small: true },
@@ -166,7 +188,7 @@ const PARTS = [
     ],
   },
   {
-    id: 'H4', name: 'H4 — Lâmpada falha (vermelha)', sub: 'falha', img: 'assets/lampada-vermelha.png',
+    id: 'H4', name: 'H4 — Lâmpada VD 2R (verde)', sub: 'marcha ré', img: 'assets/lampada-verde.png',
     x: 1570, y: 690, w: 110, h: 140, lamp: 'H4',
     terms: [
       { id: 'X1', x: 1595, y: 840, dir: 'down', label: 'X1', small: true },
@@ -174,9 +196,10 @@ const PARTS = [
     ],
   },
   {
-    id: 'BN', name: 'Barra de neutro (N)', sub: 'neutro N', kind: 'bus', x: 170, y: 1200, w: 1480, h: 62,
-    terms: [230, 400, 570, 740, 910, 1080, 1250, 1420, 1590].map((x, i) => ({
-      id: 'N' + (i + 1), x: x, y: 1228, dir: 'up', label: String(i + 1), small: true,
+    id: 'RET', name: 'Barra de retorno do comando', sub: 'retorno (Q2 polo 1)', kind: 'bus',
+    x: 660, y: 1200, w: 1000, h: 62,
+    terms: [700, 820, 940, 1060, 1180, 1300, 1420, 1540, 1660].map((x, i) => ({
+      id: 'R' + (i + 1), x: x, y: 1228, dir: 'up', label: String(i + 1), small: true,
     })),
   },
 ];
@@ -188,8 +211,8 @@ const PARTS = [
 const INTERNAL = {
   // contatos de potência do relé térmico: conduzem sempre (só desligam se disparar)
   F1_power: [['F1:1', 'F1:2'], ['F1:3', 'F1:4'], ['F1:5', 'F1:6']],
-  // barra de neutro: todos os bornes são o mesmo ponto elétrico
-  BN: ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'N7', 'N8', 'N9'].map(n => 'BN:' + n),
+  // barra de retorno: todos os bornes são o mesmo ponto elétrico
+  RET: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9'].map(n => 'RET:' + n),
 };
 
 /* ---------------------------------------------------------------------------
@@ -204,24 +227,28 @@ const MISSIONS = [
   { sec: 'pot', a: 'Q1:2', b: 'K1:1', hint: 'Saída 2 do Q1 vai na entrada 1 do contator K1 (frente).' },
   { sec: 'pot', a: 'Q1:4', b: 'K1:3', hint: 'Saída 4 do Q1 na entrada 3 do K1.' },
   { sec: 'pot', a: 'Q1:6', b: 'K1:5', hint: 'Saída 6 do Q1 na entrada 5 do K1.' },
-  { sec: 'pot', a: 'Q1:2', b: 'K2:5', hint: 'ATENÇÃO: na ré as fases são cruzadas. Saída 2 do Q1 vai no terminal 5 do K2.' },
-  { sec: 'pot', a: 'Q1:4', b: 'K2:3', hint: 'Saída 4 do Q1 no terminal 3 do K2 (fase central não troca).' },
-  { sec: 'pot', a: 'Q1:6', b: 'K2:1', hint: 'Saída 6 do Q1 no terminal 1 do K2. É o cruzamento que inverte a rotação.' },
+  // Na ré a entrada do K2 é direta — quem cruza as fases é a SAÍDA (2 e 6).
+  { sec: 'pot', a: 'Q1:2', b: 'K2:1', hint: 'As entradas do K2 são ligadas direto nas saídas do Q1: 2 → 1.' },
+  { sec: 'pot', a: 'Q1:4', b: 'K2:3', hint: 'Saída 4 do Q1 na entrada 3 do K2 (fase central não troca).' },
+  { sec: 'pot', a: 'Q1:6', b: 'K2:5', hint: 'Saída 6 do Q1 na entrada 5 do K2.' },
   { sec: 'pot', a: 'K1:2', b: 'F1:1', hint: 'Saída 2 do K1 na entrada 1 do relé térmico F1.' },
   { sec: 'pot', a: 'K1:4', b: 'F1:3', hint: 'Saída 4 do K1 na entrada 3 do F1.' },
   { sec: 'pot', a: 'K1:6', b: 'F1:5', hint: 'Saída 6 do K1 na entrada 5 do F1.' },
-  { sec: 'pot', a: 'K2:2', b: 'F1:1', hint: 'Saída 2 do K2 também chega na entrada 1 do F1 (mesmo ponto do K1).' },
-  { sec: 'pot', a: 'K2:4', b: 'F1:3', hint: 'Saída 4 do K2 na entrada 3 do F1.' },
-  { sec: 'pot', a: 'K2:6', b: 'F1:5', hint: 'Saída 6 do K2 na entrada 5 do F1.' },
+  // ATENÇÃO: o cruzamento que inverte a rotação está aqui, na saída do K2.
+  { sec: 'pot', a: 'K2:2', b: 'F1:5', hint: 'Saída 2 do K2 vai no terminal 5 do F1 — é uma das fases trocadas.' },
+  { sec: 'pot', a: 'K2:4', b: 'F1:3', hint: 'Saída 4 do K2 no terminal 3 do F1.' },
+  { sec: 'pot', a: 'K2:6', b: 'F1:1', hint: 'Saída 6 do K2 no terminal 1 do F1 — a outra fase trocada. É esse cruzamento que faz o motor girar ao contrário.' },
   { sec: 'pot', a: 'F1:2', b: 'M1:U', hint: 'Saída 2 do F1 no borne U do motor.' },
   { sec: 'pot', a: 'F1:4', b: 'M1:V', hint: 'Saída 4 do F1 no borne V do motor.' },
   { sec: 'pot', a: 'F1:6', b: 'M1:W', hint: 'Saída 6 do F1 no borne W do motor.' },
 
   // ---------- CIRCUITO DE COMANDO ----------
-  { sec: 'com', a: 'ENT:L1', b: 'Q2:1', hint: 'Fase L1 na entrada do disjuntor do comando Q2 (terminal 1).' },
-  { sec: 'com', a: 'ENT:L1', b: 'Q2:3', hint: 'A mesma fase L1 alimenta o 2º polo do Q2 — é ele que alimenta as lâmpadas.' },
-  { sec: 'com', a: 'ENT:N', b: 'BN:*', hint: 'Neutro da entrada na barra de neutro.' },
-  { sec: 'com', a: 'Q2:2', b: 'F1:95', hint: 'Saída 2 do Q2 na entrada 95 do contato NF do relé térmico.' },
+  // O Q2 é bipolar: o polo 2 (3-4) leva a FASE (L2) para o comando e para a
+  // sinalização; o polo 1 (1-2) é o RETORNO (L1) por onde tudo fecha.
+  { sec: 'com', a: 'ENT:L1', b: 'Q2:1', hint: 'Fase L1 na entrada do polo 1 do Q2 (é ele que faz o retorno do comando).' },
+  { sec: 'com', a: 'ENT:L2', b: 'Q2:3', hint: 'Fase L2 na entrada do polo 2 do Q2 (fase do comando e das lâmpadas).' },
+  { sec: 'com', a: 'Q2:2', b: 'RET:*', hint: 'Saída 2 do Q2 na barra de retorno — é por ela que as bobinas e as lâmpadas fecham o circuito.' },
+  { sec: 'com', a: 'Q2:4', b: 'F1:95', hint: 'Saída 4 do Q2 no contato NF 95 do relé térmico (começo do comando).' },
   { sec: 'com', a: 'F1:96', b: 'S0:11', hint: 'Saída 96 do relé térmico no terminal 11 do botão de parada S0.' },
   { sec: 'com', a: 'S0:12', b: 'S1:13', hint: 'Do S0 (12) para o botão frente S1 (13).' },
   { sec: 'com', a: 'S0:12', b: 'S2:13', hint: 'Do S0 (12) para o botão ré S2 (13).' },
@@ -233,23 +260,25 @@ const MISSIONS = [
   { sec: 'com', a: 'K1:12', b: 'K2:A1', hint: 'Depois do intertravamento, fecha na bobina A1 do K2.' },
   { sec: 'com', a: 'S0:12', b: 'K2:13', hint: 'Retenção: contato 13-14 do K2 em paralelo com o botão S2.' },
   { sec: 'com', a: 'K1:11', b: 'K2:14', hint: 'Outro lado da retenção do K2.' },
-  { sec: 'com', a: 'K1:A2', b: 'BN:*', hint: 'Retorno da bobina K1 para o neutro (A2 → barra N).' },
-  { sec: 'com', a: 'K2:A2', b: 'BN:*', hint: 'Retorno da bobina K2 para o neutro (A2 → barra N).' },
+  { sec: 'com', a: 'K1:A2', b: 'RET:*', hint: 'Retorno da bobina K1 para a barra de retorno (A2 → barra).' },
+  { sec: 'com', a: 'K2:A2', b: 'RET:*', hint: 'Retorno da bobina K2 para a barra de retorno (A2 → barra).' },
 
   // ---------- SINALIZAÇÃO ----------
-  // No esquema cada lâmpada tem o SEU contato auxiliar próprio:
-  // a barra do 2º polo do Q2 alimenta o contato e o contato alimenta a lâmpada.
-  { sec: 'sig', a: 'Q2:4', b: 'H1:X1', hint: 'Lâmpada de alimentação H1 direto na saída 4 do Q2 (acesa sempre que o comando estiver energizado).' },
-  { sec: 'sig', a: 'H1:X2', b: 'BN:*', hint: 'Retorno da lâmpada H1 para o neutro.' },
-  { sec: 'sig', a: 'Q2:4', b: 'K1:23', hint: 'A fase da sinalização entra no contato NA 23-24 do K1 (o contato próprio da lâmpada verde).' },
-  { sec: 'sig', a: 'K1:24', b: 'H2:X1', hint: 'Saída 24 do contato do K1 na lâmpada verde (frente).' },
-  { sec: 'sig', a: 'H2:X2', b: 'BN:*', hint: 'Retorno da lâmpada H2 para o neutro.' },
-  { sec: 'sig', a: 'Q2:4', b: 'K2:23', hint: 'A mesma fase entra no contato NA 23-24 do K2 (contato próprio da lâmpada amarela).' },
-  { sec: 'sig', a: 'K2:24', b: 'H3:X1', hint: 'Saída 24 do contato do K2 na lâmpada amarela (ré).' },
-  { sec: 'sig', a: 'H3:X2', b: 'BN:*', hint: 'Retorno da lâmpada H3 para o neutro.' },
-  { sec: 'sig', a: 'Q2:4', b: 'F1:97', hint: 'A fase da sinalização também vai no contato NA 97-98 do relé térmico (lâmpada de falha).' },
-  { sec: 'sig', a: 'F1:98', b: 'H4:X1', hint: 'Do contato 98 do F1 para a lâmpada vermelha de falha.' },
-  { sec: 'sig', a: 'H4:X2', b: 'BN:*', hint: 'Retorno da lâmpada H4 para o neutro.' },
+  // A fase (saída 4 do Q2) chega no contato e o contato alimenta a lâmpada;
+  // o X2 de cada lâmpada desce para a barra de retorno.
+  { sec: 'sig', a: 'Q2:4', b: 'F1:97', hint: 'A fase da sinalização vai no contato NA 97-98 do relé térmico (lâmpada de falha).' },
+  { sec: 'sig', a: 'F1:98', b: 'H1:X1', hint: 'Do contato 98 do F1 para a lâmpada AM SC — ela acende quando o relé atua.' },
+  { sec: 'sig', a: 'H1:X2', b: 'RET:*', hint: 'Retorno da lâmpada H1 para a barra.' },
+  { sec: 'sig', a: 'Q2:4', b: 'K1:21', hint: 'Fase no contato NF 21-22 do K1 (lâmpada que fica acesa com tudo parado).' },
+  { sec: 'sig', a: 'K1:22', b: 'K2:21', hint: 'O NF do K1 passa pelo NF do K2: a lâmpada só acende com os DOIS contatores desligados.' },
+  { sec: 'sig', a: 'K2:22', b: 'H2:X1', hint: 'Do segundo NF para a lâmpada VM MD (motor parado).' },
+  { sec: 'sig', a: 'H2:X2', b: 'RET:*', hint: 'Retorno da lâmpada H2 para a barra.' },
+  { sec: 'sig', a: 'Q2:4', b: 'K1:23', hint: 'Fase no contato NA 23-24 do K1 (lâmpada da marcha frente).' },
+  { sec: 'sig', a: 'K1:24', b: 'H3:X1', hint: 'Saída 24 do K1 na lâmpada VD ML (verde da marcha frente).' },
+  { sec: 'sig', a: 'H3:X2', b: 'RET:*', hint: 'Retorno da lâmpada H3 para a barra.' },
+  { sec: 'sig', a: 'Q2:4', b: 'K2:23', hint: 'Fase no contato NA 23-24 do K2 (lâmpada da marcha ré).' },
+  { sec: 'sig', a: 'K2:24', b: 'H4:X1', hint: 'Saída 24 do K2 na lâmpada VD 2R (verde da marcha ré).' },
+  { sec: 'sig', a: 'H4:X2', b: 'RET:*', hint: 'Retorno da lâmpada H4 para a barra.' },
 ];
 
 const SEC_LABEL = { pot: 'Circuito de Potência', com: 'Circuito de Comando', sig: 'Sinalização' };
@@ -261,8 +290,8 @@ const SEC_LABEL = { pot: 'Circuito de Potência', com: 'Circuito de Comando', si
    defeito — removendo cabo (rmWire) ou acrescentando o cabo errado (addWire).
    ========================================================================== */
 
-/* qualquer borne da barra de neutro serve: normaliza BN:N1..N9 → BN:* */
-const canonKey = k => k.replace(/^BN:N\d+$/, 'BN:*');
+/* qualquer borne da barra de retorno serve: normaliza RET:R1..R9 → RET:* */
+const canonKey = k => k.replace(/^RET:R\d+$/, 'RET:*');
 const wireKey = (a, b) => [canonKey(a), canonKey(b)].sort().join('~');
 const rmWire = (list, a, b) => list.filter(w => wireKey(w.a, w.b) !== wireKey(a, b));
 const addWire = (list, a, b) => list.concat([{ a, b, ok: false, mission: null, id: 900 + list.length }]);
@@ -270,17 +299,17 @@ const addWire = (list, a, b) => list.concat([{ a, b, ok: false, mission: null, i
 const DEFECTS = [
   {
     id: 'motor-sem-W', os: 'O.S. 1041', titulo: 'Motor não parte',
-    sintoma: 'O quadro liga normal (lâmpada branca acesa), os contatores fecham nas duas marchas e as lâmpadas de sentido acendem — mas o motor não parte: fica parado.',
+    sintoma: 'O quadro liga normal, os contatores fecham nas duas marchas e as lâmpadas de sentido acendem — mas o motor não parte: fica parado.',
     causa: 'Cabo faltando entre a saída 6 do relé térmico F1 e o borne W do motor.',
     medir: 'Com Q1 desligado, teste continuidade do borne 6 do F1 até U, V e W do motor — um deles vai dar aberto.',
     montar: w => rmWire(w, 'F1:6', 'M1:W'),
   },
   {
-    id: 're-sem-neutro', os: 'O.S. 1042', titulo: 'Marcha ré inoperante',
-    sintoma: 'Na frente tudo funciona: K1 fecha e o motor gira. Na ré nada acontece — o contator K2 não fecha e a lâmpada amarela não acende.',
-    causa: 'Retorno A2 do K2 solto da barra de neutro (o circuito da bobina não fecha).',
-    medir: 'Com o quadro desligado, meça continuidade entre A2 do K2 e a barra de neutro: dá aberto. Compare com o A2 do K1.',
-    montar: w => rmWire(w, 'K2:A2', 'BN:*'),
+    id: 're-sem-retorno', os: 'O.S. 1042', titulo: 'Marcha ré inoperante',
+    sintoma: 'Na frente tudo funciona: K1 fecha e o motor gira. Na ré nada acontece — o contator K2 não fecha e a lâmpada verde da ré não acende.',
+    causa: 'Retorno A2 do K2 solto da barra de retorno (o circuito da bobina não fecha).',
+    medir: 'Com o quadro desligado, meça continuidade entre A2 do K2 e a barra de retorno: dá aberto. Compare com o A2 do K1.',
+    montar: w => rmWire(w, 'K2:A2', 'RET:*'),
   },
   {
     id: 'sem-retencao', os: 'O.S. 1043', titulo: 'Motor só com o botão apertado',
@@ -291,17 +320,17 @@ const DEFECTS = [
   },
   {
     id: 'comando-sem-fase', os: 'O.S. 1044', titulo: 'Comando morto',
-    sintoma: 'A lâmpada de alimentação acende, mas nenhum botão responde: S1 e S2 não fecham contator nenhum.',
-    causa: 'Cabo entre a saída 2 do disjuntor Q2 e o contato 95 do relé térmico está faltando.',
-    medir: 'Com Q2 ligado, meça 2 do Q2 → 95 do F1: dá aberto. O resto do comando está energizado, mas a fase não chega ao relé.',
-    montar: w => rmWire(w, 'Q2:2', 'F1:95'),
+    sintoma: 'Nenhum botão responde e nenhuma lâmpada acende: S1 e S2 não fecham contator nenhum.',
+    causa: 'Cabo entre a saída 4 do disjuntor Q2 (polo 2) e o contato 95 do relé térmico está faltando.',
+    medir: 'Com Q2 ligado, meça 4 do Q2 → 95 do F1: dá aberto. A fase sai do Q2 mas não chega ao relé.',
+    montar: w => rmWire(w, 'Q2:4', 'F1:95'),
   },
   {
     id: 'sinalizacao-trocada', os: 'O.S. 1045', titulo: 'Sinalização invertida',
-    sintoma: 'Aperto frente e acende a lâmpada amarela; aperto a ré e acende a verde. Os sentidos do motor estão certos.',
-    causa: 'Os contatos 24 saíram trocados: o do K1 foi ligado na lâmpada amarela (H3) e o do K2 na verde (H2).',
-    medir: 'Com o quadro desligado, siga o cabo do borne 24 do K1 até a lâmpada: ele não pode chegar no X1 da amarela.',
-    montar: w => addWire(addWire(rmWire(rmWire(w, 'K1:24', 'H2:X1'), 'K2:24', 'H3:X1'), 'K1:24', 'H3:X1'), 'K2:24', 'H2:X1'),
+    sintoma: 'Aperto frente e acende a lâmpada verde da ré; aperto a ré e acende a verde da frente. Os sentidos do motor estão certos.',
+    causa: 'Os contatos 24 saíram trocados: o do K1 foi ligado na lâmpada H4 (ré) e o do K2 na H3 (frente).',
+    medir: 'Com o quadro desligado, siga o cabo do borne 24 do K1 até a lâmpada: ele não pode chegar no X1 da H4.',
+    montar: w => addWire(addWire(rmWire(rmWire(w, 'K1:24', 'H3:X1'), 'K2:24', 'H4:X1'), 'K1:24', 'H4:X1'), 'K2:24', 'H3:X1'),
   },
   {
     id: 'sem-intertravamento', os: 'O.S. 1046', titulo: 'Disjuntor geral desarmando',
@@ -312,10 +341,17 @@ const DEFECTS = [
       'K2:11', 'K1:A1'), 'K1:11', 'K2:A1'),
   },
   {
-    id: 'falha-sem-neutro', os: 'O.S. 1047', titulo: 'Lâmpada de falha não acende',
-    sintoma: 'Provocando sobrecarga, o motor para (correto) e o relé fica atuado, mas a lâmpada vermelha de falha não acende.',
-    causa: 'Retorno X2 da lâmpada de falha solto da barra de neutro.',
-    medir: 'Com Q2 desligado, meça continuidade entre o X2 das quatro lâmpadas e a barra de neutro: três passam, uma dá aberto.',
-    montar: w => rmWire(w, 'H4:X2', 'BN:*'),
+    id: 'falha-sem-retorno', os: 'O.S. 1047', titulo: 'Lâmpada de falha não acende',
+    sintoma: 'Provocando sobrecarga, o motor para (correto) e o relé fica atuado, mas a lâmpada AM SC de falha não acende.',
+    causa: 'Retorno X2 da lâmpada de falha solto da barra de retorno.',
+    medir: 'Com Q2 desligado, meça continuidade entre o X2 das quatro lâmpadas e a barra de retorno: três passam, uma dá aberto.',
+    montar: w => rmWire(w, 'H1:X2', 'RET:*'),
+  },
+  {
+    id: 'parado-sem-lampada', os: 'O.S. 1048', titulo: 'Sem indicação de motor parado',
+    sintoma: 'Ligando só o Q2 (nada girando) a lâmpada VM MD não acende. Nas marchas o comportamento está certo.',
+    causa: 'O fio entre o borne 22 do K1 e o borne 21 do K2 está faltando: falta um dos dois contatos NF em série.',
+    medir: 'Com o quadro desligado, meça continuidade entre 22 do K1 e 21 do K2: dá aberto.',
+    montar: w => rmWire(w, 'K1:22', 'K2:21'),
   },
 ];

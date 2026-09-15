@@ -273,9 +273,9 @@ function renderWires() {
   const out = [];
   const count = {};
   const bump = k => { count[k] = (count[k] || 0) + 1; };
-  // barra de neutro: todos os bornes são o MESMO ponto elétrico → desenha o trilho
-  const bn = PART_BY_ID.BN;
-  if (S.placed.BN) out.push(`<polyline class="busbar" points="${bn.terms.map(t => t.x + ',' + t.y).join(' ')}"/>`);
+  // barra de retorno: todos os bornes são o MESMO ponto elétrico → desenha o trilho
+  const bus = PART_BY_ID.RET;
+  if (S.placed.RET) out.push(`<polyline class="busbar" points="${bus.terms.map(t => t.x + ',' + t.y).join(' ')}"/>`);
   S.wires.forEach((w, i) => {
     const off = ((i % 5) - 2) * 7;
     const col = res ? wireColor(res.net, w.a) : '#4b5563';
@@ -454,38 +454,38 @@ const TEST_STEPS = [
   {
     id: 'energ', title: 'Energizar o circuito de comando',
     task: 'Ligue Q1 e depois Q2 na bancada.',
-    why: 'Com o Q2 fechado a fase L1 chega ao relé F1 e à barra das lâmpadas.',
-    ok: res => S.q1 && S.q2 && !S.f1Tripped && res.lamps.H1,
+    why: 'Com o Q2 fechado a fase L2 chega ao relé F1 e à barra das lâmpadas, e o polo 1 fecha o retorno. Com tudo parado acende a VM MD (motor desligado).',
+    ok: res => S.q1 && S.q2 && !S.f1Tripped && res.lamps.H2 && !res.lamps.H1,
   },
   {
     id: 'frente', title: 'Partida frente — S1',
     task: 'Aperte S1 (botão verde ou tecla 1).',
-    why: 'K1 energiza pelo contato NF 11-12 do K2, o motor gira no sentido horário e a lâmpada verde acende.',
-    ok: res => res.coils.K1 && !res.coils.K2 && res.motor.dir > 0 && res.lamps.H2,
+    why: 'K1 energiza pelo contato NF 11-12 do K2, o motor gira no sentido horário e a verde VD ML acende (a VM MD apaga).',
+    ok: res => res.coils.K1 && !res.coils.K2 && res.motor.dir > 0 && res.lamps.H3 && !res.lamps.H2,
   },
   {
     id: 'parada', title: 'Parada — S0',
     task: 'Aperte S0 (botão vermelho ou tecla 0).',
-    why: 'O NF do S0 abre o circuito do comando: os contatores caem e o motor para (só a lâmpada de alimentação fica acesa).',
-    ok: res => !res.coils.K1 && !res.coils.K2 && res.motor.state === 'parado',
+    why: 'O NF do S0 abre o circuito do comando: os contatores caem, o motor para e a lâmpada VM MD volta a acender.',
+    ok: res => !res.coils.K1 && !res.coils.K2 && res.motor.state === 'parado' && res.lamps.H2,
   },
   {
     id: 're', title: 'Partida ré — S2',
     task: 'Aperte S2 (botão preto ou tecla 2).',
-    why: 'Agora é o K2 que energiza: duas fases entram cruzadas, o motor gira ao contrário e a lâmpada amarela acende.',
-    ok: res => res.coils.K2 && !res.coils.K1 && res.motor.dir < 0 && res.lamps.H3,
+    why: 'Agora é o K2 que energiza: as saídas 2 e 6 do K2 trocam as fases, o motor gira ao contrário e a verde VD 2R acende.',
+    ok: res => res.coils.K2 && !res.coils.K1 && res.motor.dir < 0 && res.lamps.H4,
   },
   {
     id: 'sobrecarga', title: 'Proteção por sobrecarga — F1',
     task: 'Com o motor girando, selecione a carga “Sobrecarga ⚠” e espere o relé atuar.',
-    why: 'O contato 95-96 abre (desliga os contatores) e o 97-98 fecha, acendendo a lâmpada vermelha de falha.',
-    ok: res => S.f1Tripped && res.motor.state === 'parado' && res.lamps.H4,
+    why: 'O contato 95-96 abre (desliga os contatores) e o 97-98 fecha, acendendo a lâmpada AM SC de falha.',
+    ok: res => S.f1Tripped && res.motor.state === 'parado' && res.lamps.H1,
   },
   {
     id: 'rearme', title: 'Rearme do relé térmico',
     task: 'Aperte REARMAR no F1 e volte a carga para “Carga nominal”.',
     why: 'Rearmado, o 95-96 fecha de novo, o 97-98 abre e a lâmpada de falha apaga — o quadro volta a funcionar.',
-    ok: res => !S.f1Tripped && !res.lamps.H4,
+    ok: res => !S.f1Tripped && !res.lamps.H1,
   },
 ];
 
@@ -623,7 +623,7 @@ function setMeter(on) {
    Os defeitos (sintoma, causa e como medir) estão em data.js.
    ========================================================================== */
 
-/** fiação de referência (a do esquema), com os neutros distribuídos na barra */
+/** fiação de referência (a do esquema), com os retornos distribuídos na barra */
 function goldenWires() {
   const used = new Set();
   return MISSIONS.map(m => {
@@ -637,7 +637,7 @@ function goldenWires() {
   });
 }
 
-/** compara a fiação atual com a do esquema (aceita qualquer borne da barra de neutro) */
+/** compara a fiação atual com a do esquema (aceita qualquer borne da barra de retorno) */
 function wiringMatchesSchema() {
   const norm = list => list.map(w => wireKey(w.a, w.b)).sort();
   const want = norm(goldenWires()), have = norm(S.wires);
@@ -806,7 +806,7 @@ function applyVisual(res) {
     if (!el) return;
     const on = res.lamps[h];
     el.classList.toggle('lamp-on', on);
-    const c = { H1: '#f6f6e8', H2: '#39e07a', H3: '#ffd12e', H4: '#ff4d3d' }[h];
+    const c = { H1: '#ffd12e', H2: '#ff4d3d', H3: '#39e07a', H4: '#39e07a' }[h];
     el.style.setProperty('--glow', c);
   });
   const m = $('.part[data-part="M1"]');
@@ -860,8 +860,8 @@ function updateUI(res) {
   f1.textContent = S.f1Tripped ? 'ATUADO (sobrecarga)' : 'normal';
   f1.className = 'pill ' + (S.f1Tripped ? 'err' : 'ok');
 
-  const lampDef = [['H1', 'Alimentação', '#f6f6e8'], ['H2', 'Frente', '#39e07a'],
-  ['H3', 'Ré', '#ffd12e'], ['H4', 'Falha', '#ff4d3d']];
+  const lampDef = [['H1', 'AM SC · falha', '#ffd12e'], ['H2', 'VM MD · parado', '#ff4d3d'],
+  ['H3', 'VD ML · frente', '#39e07a'], ['H4', 'VD 2R · ré', '#39e07a']];
   $('#st-lamps').innerHTML = lampDef.map(([id, nm, c]) =>
     `<div class="lamp ${res.lamps[id] ? 'on' : ''}" style="--c:${c}">
        <div class="bulb"></div>${nm}</div>`).join('');
@@ -881,8 +881,8 @@ function updateUI(res) {
 
   // bancada
   const ctrlLive = !S.f1Tripped && S.q2;
-  $('#ro-voltage').innerHTML = `Tensão no comando: <b>${ctrlLive ? 'L1 presente ~220 V' : '0 V'}</b>`;
-  const rv2 = $('#ro-voltage2'); if (rv2) rv2.textContent = ctrlLive ? '220 V' : '0 V';
+  $('#ro-voltage').innerHTML = `Tensão no comando: <b>${ctrlLive ? '380 V entre L1 e L2' : '0 V'}</b>`;
+  const rv2 = $('#ro-voltage2'); if (rv2) rv2.textContent = ctrlLive ? '380 V' : '0 V';
   let msg = 'Ligue Q1 e Q2 para energizar o quadro.';
   if (S.short) msg = 'Curto-circuito detectado: rearme o disjuntor depois de corrigir a fiação.';
   else if (S.f1Tripped) msg = 'Relé térmico atuou. Aperte REARMAR no F1 e reduza a carga.';
@@ -1097,7 +1097,7 @@ function celebrate() {
       <div class="big">${S.score} pts</div>
       <p>Tempo: <b>${t}</b> · Ligações: <b>${S.wires.length}</b> · Tentativas erradas: <b>${S.errors}</b></p>
       <p style="color:#9fb6c9;font-size:13px">Desafios extras: monte sem o intertravamento (11-12 cruzados) e veja
-         o curto-circuito; troque duas fases na saída do Q2 para o K2 e confira a rotação invertida.</p>
+         o curto-circuito; troque entre si as fases da saída do K2 (2 e 6) e confira a rotação invertida.</p>
       <button class="btn" onclick="window.print()">🖨 Imprimir</button>
     </div>`;
   $('#modal').classList.remove('hidden');
@@ -1125,7 +1125,8 @@ function showSchematic() {
       ['11-12', 'Contato auxiliar NF (intertravamento)'],
       ['95-96', 'Contato NF do relé térmico'], ['97-98', 'Contato NA do relé térmico'],
       ['A1/A2', 'Bobina do contator'],
-      ['H1…H4', 'Lâmpadas de sinalização (alimentação / frente / ré / falha)']]
+      ['H1…H4', 'Lâmpadas de sinalização (AM SC falha / VM MD motor parado / VD ML frente / VD 2R ré)'],
+      ['RET', 'Barra de retorno do comando — vem da saída 2 do Q2 (polo 1, fase L1)']]
       .map(([a, b]) => `<div><b>${a}</b> — ${b}</div>`).join('')}
     </div>
     <img class="schem" style="margin-top:14px" src="assets/esquema-2.jpg" alt="Poster do esquema">`;
@@ -1145,7 +1146,7 @@ function verify() {
         ? `Atenção: há <b>${extra}</b> cabo(s) que não existem no esquema — provavelmente precisa cortar (clique no cabo).`
         : '✔ Nenhum cabo fora do esquema.'}</div>
       <div class="check">Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> gira para frente,
-        <b>S2</b> gira para trás e <b>S0</b> para o motor. Sobrecarga atua no F1 e acende a lâmpada de falha.</div>`;
+        <b>S2</b> gira para trás e <b>S0</b> para o motor. Sobrecarga atua no F1 e acende a lâmpada AM SC de falha.</div>`;
     $('#modal').classList.remove('hidden');
     return;
   }
@@ -1161,8 +1162,9 @@ function verify() {
   if (S.res.short) rows.push(`<div class="check err">Curto-circuito: duas fases no mesmo ponto (ou fase direto no neutro).</div>`);
   if (!S.res.short && missing.length === 0) {
     rows.push(`<div class="check ok">Circuito elétrico coerente com o esquema. 🎯</div>`);
-    rows.push(`<div class="check">Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> → K1 (frente) e H2 acende;
-      <b>S2</b> → K2 (ré) e H3 acende; <b>S0</b> desliga tudo. O relé térmico só atua em sobrecarga.</div>`);
+    rows.push(`<div class="check">Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> → K1 (frente) e a verde VD ML acende;
+      <b>S2</b> → K2 (ré) e a verde VD 2R acende; <b>S0</b> desliga tudo e acende a VM MD (motor parado).
+      O relé térmico só atua em sobrecarga, aí acende a AM SC.</div>`);
   }
   $('#modal-title').textContent = 'Verificação da montagem';
   $('#modal-body').innerHTML = rows.join('');
@@ -1182,7 +1184,7 @@ function autoMount() {
     const cur = currentMission();
     if (!cur) { S.auto = false; coachShow('Pronto!', 'Montagem automática concluída — teste com S1 e S2.'); return; }
     const m = cur.m;
-    // para "BN:*" o robô escolhe um borne de neutro ainda livre (como no esquema,
+    // para "RET:*" o robô escolhe um borne de retorno ainda livre (como no esquema,
     // em que cada retorno desce num ponto diferente da barra)
     const pick = pat => {
       if (!pat.endsWith(':*')) return pat;

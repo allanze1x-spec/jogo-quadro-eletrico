@@ -2,6 +2,11 @@
    sim.js — "motor de simulação" do quadro elétrico.
    Constrói os nós elétricos (union-find) a partir dos fios montados e do
    estado dos contatos, e resolve bobinas / lâmpadas / motor por ponto fixo.
+
+   O retorno do comando NÃO é neutro: o esquema alimenta as bobinas e as
+   lâmpadas entre duas FASES (L2 pelo polo 2 do Q2 e L1 pelo polo 1). Por isso
+   a regra de "carga energizada" aqui é: dois bornes em potenciais DIFERENTES
+   (fase-fase, ou fase-neutro caso exista um neutro na montagem).
    ========================================================================== */
 
 /* ---------------- utilidades ---------------- */
@@ -51,9 +56,9 @@ function buildNets(state, wires, coils) {
   // relé térmico: os contatos de potência conduzem (são só um caminho em série)
   INTERNAL.F1_power.forEach(([a, b]) => dsu.union(a, b));
 
-  // barra de neutro: um único ponto elétrico
-  const bn = INTERNAL.BN;
-  bn.forEach(t => dsu.union(bn[0], t));
+  // barra de retorno: um único ponto elétrico
+  const ret = INTERNAL.RET;
+  ret.forEach(t => dsu.union(ret[0], t));
 
   // Q1 — chave seccionadora tripolar
   if (state.q1) [['1', '2'], ['3', '4'], ['5', '6']].forEach(([a, b]) => dsu.union('Q1:' + a, 'Q1:' + b));
@@ -62,13 +67,15 @@ function buildNets(state, wires, coils) {
   if (state.q2) [['1', '2'], ['3', '4']].forEach(([a, b]) => dsu.union('Q2:' + a, 'Q2:' + b));
 
   // contatores K1 / K2
-  //  13-14 = NA de auto-retenção · 23-24 = NA da sinalização · 11-12 = NF de intertravamento
+  //  13-14 = NA da auto-retenção · 23-24 = NA da sinalização da marcha
+  //  11-12 = NF do intertravamento · 21-22 = NF da sinalização (motor parado)
   ['K1', 'K2'].forEach(k => {
     if (coils[k]) {
       [['1', '2'], ['3', '4'], ['5', '6'], ['13', '14'], ['23', '24']]
         .forEach(([a, b]) => dsu.union(k + ':' + a, k + ':' + b));
     } else {
       dsu.union(k + ':11', k + ':12');   // NF de intertravamento fechado (K desligado)
+      dsu.union(k + ':21', k + ':22');   // NF da sinalização fechado (K desligado)
     }
   });
 
@@ -136,8 +143,7 @@ function solve(state, wires, prev) {
 
   // lâmpadas
   ['H1', 'H2', 'H3', 'H4'].forEach(h => {
-    const x1 = net.netOf[h + ':X1'], x2 = net.netOf[h + ':X2'];
-    res.lamps[h] = !!(x1 && x2 && x1.phases.size > 0 && x2.hasN && x1 !== x2);
+    res.lamps[h] = energized(net, h + ':X1', h + ':X2');
   });
 
   // motor
@@ -158,9 +164,26 @@ function solve(state, wires, prev) {
 }
 
 function coilOn(net, k) {
-  const a1 = net.netOf[k + ':A1'], a2 = net.netOf[k + ':A2'];
-  if (!a1 || !a2 || a1 === a2) return false;
-  return a1.phases.size > 0 && a2.hasN;
+  return energized(net, k + ':A1', k + ':A2');
+}
+
+/**
+ * Uma carga (bobina, lâmpada) está energizada quando os seus dois bornes estão
+ * em nós DIFERENTES com potenciais ativos e diferentes entre si.
+ * No esquema isso é fase-fase (L1 x L2 pelo Q2 bipolar); o neutro também vale
+ * caso a montagem tenha um.
+ */
+function energized(net, ka, kb) {
+  const a = net.netOf[ka], b = net.netOf[kb];
+  if (!a || !b || a === b) return false;
+  const pa = [...a.phases], pb = [...b.phases];
+  const liveA = pa.length > 0 || a.hasN;
+  const liveB = pb.length > 0 || b.hasN;
+  if (!liveA || !liveB) return false;
+  if (a.hasN && b.hasN) return false;                       // dois neutros = sem tensão
+  if (pa.length && pb.length && pa.length === pb.length &&
+      pa.every(p => pb.includes(p))) return false;          // mesma fase dos dois lados
+  return true;
 }
 
 /** fase (1,2,3) presente em cada borne do motor — null se não houver */
