@@ -531,6 +531,27 @@ function renderPane() {
   $('#tab-badge').classList.toggle('hidden', !(teste && currentTest()));
 }
 
+/**
+ * Rola APENAS o contêiner da lista de tarefas até a ligação/teste atual.
+ * Nunca usar scrollIntoView aqui: no celular o painel é uma gaveta position:fixed
+ * FORA da tela (translateX(102%)) e o browser arrastava a viewport inteira para
+ * "revelar" o elemento — a cada ligação feita a câmera da placa saía do lugar.
+ * Este jeito rola só o .tabbody do painel e só quando ele está visível.
+ */
+function rolarListaAteAtual() {
+  const sb = $('#sidebar');
+  if (!(window.innerWidth > 1180 || sb.classList.contains('open'))) return;   // gaveta fechada
+  const scope = $('#test-list').classList.contains('hidden') ? $('#mission-list') : $('#test-list');
+  const el = scope && scope.querySelector('.mission.current');
+  if (!el) return;
+  const sc = el.closest('.tabbody');
+  if (!sc) return;
+  const sr = sc.getBoundingClientRect(), er = el.getBoundingClientRect();
+  if (!er.height) return;                       // lista oculta (display:none)
+  const alvo = Math.max(0, er.top - sr.top + sc.scrollTop - sc.clientHeight * .3);
+  if (Math.abs(sc.scrollTop - alvo) > 4) sc.scrollTo({ top: alvo, behavior: 'smooth' });
+}
+
 function renderMissions() {
   if (S.mode === 'manutencao' && S.defect) {
     const d = S.defect;
@@ -559,14 +580,13 @@ function renderMissions() {
     return;
   }
   const list = [];
-  let lastSec = null, lastSub = null;
+  let lastSec = null;
   const cur = currentMission();
   const fmt = k => k.endsWith(':*') ? k.slice(0, -2) + ':*' : k;
   MISSIONS.forEach((m, i) => {
     if (m.sec !== lastSec) { lastSec = m.sec; list.push(`<div class="sec-head">${SECTIONS[m.sec] || m.sec}</div>`); }
     const done = S.done.has(i), atual = cur && cur.i === i;
     const cls = done ? 'done' : (atual ? 'current' : '');
-    if (atual) lastSub = i;
     list.push(`<div class="mission ${cls}" data-mi="${i}">
        <div class="dot">${done ? '✓' : i + 1}</div>
        <div class="body">
@@ -579,8 +599,7 @@ function renderMissions() {
   });
   $('#mission-list').innerHTML = list.join('');
   renderPane();
-  const el = $('.mission.current');
-  if (el && lastSub !== null) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  rolarListaAteAtual();
 }
 
 function paintTargets() {
@@ -638,6 +657,7 @@ function renderTests() {
      </div>`;
   }).join('');
   renderPane();
+  rolarListaAteAtual();
 }
 
 function evalTests(res) {
@@ -681,6 +701,8 @@ function openSidebar(on) {
   const estreito = window.innerWidth <= 1180;
   $('#sidebar').classList.toggle('open', !!on && estreito);
   scrim().classList.toggle('hidden', !(on && estreito));
+  /* abriu a gaveta: agora sim a ligação atual pode ser trazida à vista */
+  if (on && estreito) setTimeout(rolarListaAteAtual, 260);
 }
 let _scrim = null;
 function scrim() {
