@@ -1149,51 +1149,76 @@ function finishEtapa1() {
 }
 
 function setupDrag() {
+  /*
+   * Arraste das peças da caixa para a placa. Funciona com mouse E com toque:
+   *  · o toque é rastreado pelo pointerId (o primeiro dedo que pegou a peça);
+   *  · pointercancel devolve a peça à caixa — é o que o navegador manda quando
+   *    ele rouba o gesto (rolar/zoom), e sem isso o fantasma ficava preso na
+   *    tela no celular;
+   *  · a tolerância de encaixe é definida EM TELA (~46 px de dedo) e convertida
+   *    para px do palco — com zoom de 21% do celular, 60 px do palco seriam só
+   *    ~12 px na tela e o encaixe não aconteceria.
+   */
   let drag = null;
 
+  /** o ponteiro está dentro da zona de encaixe da peça (em px do palco)? */
+  const naZona = (p, sp) => {
+    const tol = clamp(46 / Math.max(VIEW.z, .1), 60, 280);
+    return sp.x > p.x - tol && sp.x < p.x + p.w + tol &&
+      sp.y > p.y - tol && sp.y < p.y + p.h + tol;
+  };
+
   const onDown = e => {
-    const item = e.target.closest('[data-tray]');
+    if (drag) return;                              // um arraste por vez (multi-toque)
+    const item = e.target.closest?.('[data-tray]');   // ?. : alvo pode não ser elemento
     if (!item) return;
     e.preventDefault();
     const id = item.dataset.tray, p = PART_BY_ID[id];
-    drag = { id, ghost: document.createElement('div') };
+    drag = { id, pid: e.pointerId, item, ghost: document.createElement('div') };
+    /* o fantasma segue o dedo no tamanho do zoom (com piso, para dar para ver
+       o que está na mão num celular) */
+    const scale = Math.max(parseFloat($('#zoom-val').textContent) / 100, .32);
     drag.ghost.className = 'dragghost';
     drag.ghost.style.cssText = `position:fixed;width:${p.w}px;height:${p.h}px;pointer-events:none;z-index:500;
        transform:translate(-50%,-50%);opacity:.9;filter:drop-shadow(0 12px 18px rgba(0,0,0,.6))`;
     drag.ghost.innerHTML = p.img ? `<img src="${p.img}" style="width:100%;height:100%;object-fit:contain">` : '';
     drag.ghost.style.left = e.clientX + 'px';
     drag.ghost.style.top = e.clientY + 'px';
+    drag.ghost.style.transform = `translate(-50%,-50%) scale(${scale})`;
     document.body.appendChild(drag.ghost);
     item.style.opacity = '.4';
-    const scale = parseFloat($('#zoom-val').textContent) / 100;
-    drag.ghost.style.transform = `translate(-50%,-50%) scale(${scale})`;
   };
 
   const onMove = e => {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pid) return;
     drag.ghost.style.left = e.clientX + 'px';
     drag.ghost.style.top = e.clientY + 'px';
     const sp = toStage(e.clientX, e.clientY);
-    const p = PART_BY_ID[drag.id];
-    const inZone = sp.x > p.x - 60 && sp.x < p.x + p.w + 60 && sp.y > p.y - 60 && sp.y < p.y + p.h + 60;
-    $(`[data-ghost="${drag.id}"]`)?.classList.toggle('over', inZone);
+    $(`[data-ghost="${drag.id}"]`)?.classList.toggle('over', naZona(PART_BY_ID[drag.id], sp));
   };
 
-  const onUp = e => {
-    if (!drag) return;
+  /** solta (pointerup) ou cancela (pointercancel: rolagem/gesto do navegador) */
+ const solta = (e, podeEncaixar) => {
+    if (!drag || e.pointerId !== drag.pid) return;
     const p = PART_BY_ID[drag.id];
-    const sp = toStage(e.clientX, e.clientY);
-    const inZone = sp.x > p.x - 60 && sp.x < p.x + p.w + 60 && sp.y > p.y - 60 && sp.y < p.y + p.h + 60;
+    let colocou = false;
+    if (podeEncaixar) {
+      const sp = toStage(e.clientX, e.clientY);
+      colocou = naZona(p, sp);
+    }
     drag.ghost.remove();
     $(`[data-ghost="${drag.id}"]`)?.classList.remove('over');
-    if (inZone) placePart(drag.id, true);
-    else { const el = $(`[data-tray="${drag.id}"]`); if (el) el.style.opacity = ''; }
+    if (colocou) placePart(drag.id, true);
+    else drag.item.style.opacity = '';
     drag = null;
   };
+  const onUp = e => solta(e, true);
+  const onCancel = e => solta(e, false);   // devolve a peça à caixa, sem encaixar
 
   document.addEventListener('pointerdown', onDown);
   document.addEventListener('pointermove', onMove);
   document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onCancel);
 }
 
 function toStage(clientX, clientY) {
