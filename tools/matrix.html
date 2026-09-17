@@ -13,46 +13,87 @@
   /* Carrega o jogo em vários viewports (as media queries respondem ao tamanho de
      cada iframe) e expõe window.medir() com as checagens de layout.  */
   const TAMANHOS = [
-    { nome: 'desktop', w: 1440, h: 900 },
-    { nome: 'notebook', w: 1180, h: 800 },
-    { nome: 'tablet', w: 900, h: 780 },
-    { nome: 'celular', w: 390, h: 844 },
+    { nome: 'desktop', w: 1440, h: 900, src: '/index.html?m=inversor' },
+    { nome: 'notebook', w: 1180, h: 800, src: '/index.html?m=inversor' },
+    { nome: 'notebook-baixo', w: 1100, h: 700, src: '/index.html?m=reversao' },
+    { nome: 'tablet-paisagem', w: 1024, h: 768, src: '/index.html?m=reversao' },
+    { nome: 'tablet', w: 768, h: 1024, src: '/index.html?m=reversao' },
+    { nome: 'celular-grande', w: 430, h: 932, src: '/index.html?m=reversao' },
+    { nome: 'celular', w: 390, h: 844, src: '/index.html?m=inversor' },
+    { nome: 'celular-mini', w: 320, h: 640, src: '/index.html?m=reversao' },
+    { nome: 'missoes-desktop', w: 1440, h: 900, src: '/index.html' },
+    { nome: 'missoes-celular', w: 390, h: 844, src: '/index.html' },
   ];
   const palco = document.getElementById('palco');
   palco.innerHTML = TAMANHOS.map(t =>
-    `<iframe data-nome="${t.nome}" width="${t.w}" height="${t.h}" src="/index.html"></iframe>`).join('');
+    `<iframe data-nome="${t.nome}" width="${t.w}" height="${t.h}" src="${t.src}"></iframe>`).join('');
   const frames = [...palco.querySelectorAll('iframe')];
 
   function metricas(fr) {
     const d = fr.contentDocument, w = fr.contentWindow;
+    if (!d || !d.querySelector('.topbar')) return { nome: fr.dataset.nome, carregando: true };
+    /* força um aviso bem longo e mede o quanto ele cobre a placa: se o aviso
+       ficar por cima do quadro, a montagem fica atrapalhada. */
+    if (w.coachShow) w.coachShow('Aviso longo de teste',
+      'Este texto é propositalmente comprido para medir quanto do quadro o aviso tapa durante a montagem.', 60000);
     const R = s => { const el = d.querySelector(s); if (!el) return null; const r = el.getBoundingClientRect();
       return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
+    const sel = d.querySelector('#mselect');
+    const seletorAberto = sel && !sel.classList.contains('hidden');
     const painel = d.querySelector('#sidebar');
-    const tab = R('#board'), band = R('#tray');
-    const fora = R('#objective');
+    const pr = painel.getBoundingClientRect();
+    const tabuleiro = R('#board'), bandeja = R('#tray'), dock = R('#dock');
+    const tools = d.querySelector('.tools');
+    const hud = R('.hud');
+    const areaTela = w.innerWidth * w.innerHeight;
+    const scr = d.querySelector('#scrim');
     return {
       nome: fr.dataset.nome, viewport: w.innerWidth + 'x' + w.innerHeight,
-      topbar: R('.topbar'), dock: R('#dock'), bandeja: band, quadro: R('#board-wrap'), tabuleiro: tab,
-      painelFixo: painel.getBoundingClientRect().x < w.innerWidth - 1 && w.innerWidth > 1180,
-      gavetaFora: painel.getBoundingClientRect().x >= w.innerWidth - 1,
-      botaoPainel: w.innerWidth <= 1180 ? d.querySelector('#btn-panel').offsetParent !== null : d.querySelector('#btn-panel').offsetParent === null,
+      seletor: seletorAberto,
+      painelFixo: pr.x >= 0 && pr.x + pr.width <= w.innerWidth + 1 && w.innerWidth > 1180,
+      painelGaveta: pr.x >= w.innerWidth - 1,
+      botaoPainel: d.querySelector('#btn-panel').offsetParent !== null,
       overflow: [d.documentElement.scrollWidth - d.documentElement.clientWidth,
                  d.documentElement.scrollHeight - d.documentElement.clientHeight],
+      ferramentasCortadas: tools.scrollWidth - tools.clientWidth,
+      hudCortado: hud ? Math.max(0, hud.x + hud.w - w.innerWidth) : null,
       dockRolavel: d.querySelector('#dock').scrollWidth > d.querySelector('#dock').clientWidth + 1,
       bandejaRolavel: d.querySelector('.tray-items').scrollWidth > d.querySelector('.tray-items').clientWidth + 1,
-      quadroSobrepoeBandeja: tab && band ? tab.y + tab.h > band.y + 1 : null,
-      objetivoCabe: fora && fora.w <= w.innerWidth,
-      zoomDentro: R('.zoombar') && R('.zoombar').x + R('.zoombar').w <= w.innerWidth + 1,
-      zoomAcimaDaBandeja: R('.zoombar') && band ? R('.zoombar').y + R('.zoombar').h <= band.y + 1 : null,
-      objetivosVisiveis: [...d.querySelectorAll('.hud-item')].filter(e => e.offsetParent).length,
-      rotulosFerramentas: [...d.querySelectorAll('.tools .btn span')].filter(s => s.offsetParent).length,
+      tabuleiro, bandeja, dock,
+      tabuleiroSobreBandeja: tabuleiro && bandeja ?
+        (Math.min(tabuleiro.x + tabuleiro.w, bandeja.x + bandeja.w) - Math.max(tabuleiro.x, bandeja.x) > 1 &&
+         Math.min(tabuleiro.y + tabuleiro.h, bandeja.y + bandeja.h) - Math.max(tabuleiro.y, bandeja.y) > 1) : null,
+      areaTabuleiroPct: tabuleiro ? Math.round(tabuleiro.w * tabuleiro.h / areaTela * 100) : null,
       zoom: d.querySelector('#zoom-val').textContent,
+      rotulosFerramentas: [...d.querySelectorAll('.tools .btn span')].filter(s => s.offsetParent).length,
+      objetivosVisiveis: [...d.querySelectorAll('.hud-item')].filter(e => e.offsetParent).length,
+      cartoes: d.querySelectorAll('#mselect-list .mcard').length,
+      aviso: avisoSobrePlaca(d), objetivo: objetivoSobrePlaca(d),
     };
+  }
+
+  /* fração (%) da placa coberta pelo aviso / pela barra de objetivo */
+  function cobre(d, ca, cb) {
+    const A = d.querySelector(ca), B = d.querySelector(cb);
+    if (!A || !B || A.classList.contains('hidden')) return 0;
+    const a = A.getBoundingClientRect(), b = B.getBoundingClientRect();
+    const iw = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const ih = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (iw <= 0 || ih <= 0) return 0;
+    const placa = d.querySelector('.stage').getBoundingClientRect();
+    const ref = d.querySelector('#board').getBoundingClientRect();
+    return { pctPlaca: Math.round(iw * ih / (placa.width * placa.height) * 100),
+      pctTab: Math.round(iw * ih / (ref.width * ref.height) * 100),
+      largura: Math.round(a.width), altura: Math.round(a.height) };
+  }
+  function avisoSobrePlaca(d) { return cobre(d, '#coach', '.stage');
+  }
+  function objetivoSobrePlaca(d) { return cobre(d, '#objective', '.stage');
   }
 
   window.medir = () => frames.map(metricas);
   window.addEventListener('load', () => {
-    setTimeout(() => { document.getElementById('resumo').textContent = 'pronto: ' + frames.length + ' viewports'; }, 600);
+    setTimeout(() => { document.getElementById('resumo').textContent = 'pronto: ' + frames.length + ' viewports'; }, 1200);
   });
 </script>
 </body>

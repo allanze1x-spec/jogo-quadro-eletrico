@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0b1116">
-<title>Quadro Elétrico — Reversão de Rotação (Frente / Ré)</title>
+<meta name="theme-color" content="#0a0a0a">
+<title>Bancada de Comandos — missões de quadro elétrico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -27,6 +30,8 @@
   <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.4 12h13.2"/></symbol>
   <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.6A1.6 1.6 0 0 1 5.6 4H9M15 4h3.4A1.6 1.6 0 0 1 20 5.6V9M20 15v3.4a1.6 1.6 0 0 1-1.6 1.6H15M9 20H5.6A1.6 1.6 0 0 1 4 18.4V15"/></symbol>
   <symbol id="i-tray" viewBox="0 0 24 24"><path d="M3.4 13.6 6 5.6A1.6 1.6 0 0 1 7.5 4.5h9A1.6 1.6 0 0 1 18 5.6l2.6 8M3.4 13.6h17.2v4.2a1.6 1.6 0 0 1-1.6 1.6H5A1.6 1.6 0 0 1 3.4 17.8z"/><path d="M8.6 13.6V16h6.8v-2.4"/></symbol>
+  <symbol id="i-missions" viewBox="0 0 24 24"><path d="M5 3.4h11.4a2 2 0 0 1 2 2v15.2H7a2 2 0 0 1-2-2z"/><path d="M9 8h6M9 12h6M9 16h3"/></symbol>
+  <symbol id="i-drive" viewBox="0 0 24 24"><rect x="4.2" y="3.4" width="15.6" height="17.2" rx="2.2"/><path d="M7.6 7.2h8.8M7.6 11h8.8M9.4 16.4h5.2"/></symbol>
 </defs></svg>
 
 <!-- ============================== BARRA SUPERIOR ============================== -->
@@ -34,8 +39,8 @@
   <div class="brand">
     <span class="logo"><svg class="ic"><use href="#i-bolt"/></svg></span>
     <span class="brand-txt">
-      <strong>Quadro Elétrico</strong>
-      <small>Comando de motor trifásico com reversão — frente / ré</small>
+      <strong id="brand-title">Quadro de comando</strong>
+      <small id="brand-sub">Missões de painel industrial — fixar, ligar e testar</small>
     </span>
   </div>
 
@@ -60,7 +65,9 @@
   </div>
 
   <div class="tools">
-    <button id="btn-esquema" class="btn ghost" title="Ver o esquema elétrico de referência" aria-label="Esquema elétrico">
+    <button id="btn-missoes" class="btn ghost" title="Trocar de missão" aria-label="Missões">
+      <svg class="ic"><use href="#i-missions"/></svg><span>Missões</span></button>
+    <button id="btn-esquema" class="btn ghost" title="Referência elétrica do projeto" aria-label="Esquema">
       <svg class="ic"><use href="#i-schematic"/></svg><span>Esquema</span></button>
     <button id="btn-verificar" class="btn ghost" title="Conferir a montagem / emitir laudo" aria-label="Verificar">
       <svg class="ic"><use href="#i-verify"/></svg><span>Verificar</span></button>
@@ -68,7 +75,7 @@
       <svg class="ic"><use href="#i-bulb"/></svg><span>Dica</span></button>
     <button id="btn-meter" class="btn ghost" title="Multímetro: clique em dois bornes para medir" aria-label="Multímetro">
       <svg class="ic"><use href="#i-meter"/></svg><span>Medir</span></button>
-    <button id="btn-manut" class="btn ghost" title="Modo manutenção: defeito escondido para diagnosticar" aria-label="Manutenção">
+    <button id="btn-manut" class="btn ghost" title="Ordem de serviço: defeito escondido" aria-label="Manutenção">
       <svg class="ic"><use href="#i-gear"/></svg><span>Manutenção</span></button>
     <button id="btn-livre" class="btn ghost" title="Modo livre: libera ligações fora do esquema" aria-label="Modo livre">
       <svg class="ic"><use href="#i-panel"/></svg><span>Livre</span></button>
@@ -85,16 +92,6 @@
 <main class="workspace">
 
   <section id="board-wrap">
-
-    <!-- objetivo do momento + atalho para achar os bornes no quadro -->
-    <div id="objective" class="objective">
-      <span class="obj-step">
-        <b id="obj-etapa">Etapa 1</b><i id="obj-count">0 / 18</i>
-      </span>
-      <p id="obj-text">Arraste cada componente da caixa para o contorno tracejado na placa.</p>
-      <button id="obj-locate" class="btn ghost tiny" title="Dar zoom nos bornes desta ligação" aria-label="Localizar no quadro">
-        <svg class="ic"><use href="#i-target"/></svg><span>Localizar</span></button>
-    </div>
 
     <div id="board" class="board">
       <div id="stage" class="stage">
@@ -163,7 +160,13 @@
           <span id="pane-count">0 / 18</span>
         </div>
         <span class="bar big"><i id="pane-bar"></i></span>
-        <p id="pane-sub" class="pane-sub">Arraste os componentes da caixa para os contornos da placa.</p>
+        <!-- o que fazer AGORA: fica no painel, nunca sobre a placa -->
+        <div id="objective" class="objective">
+          <span class="obj-step"><b id="obj-etapa">Etapa 1</b><i id="obj-count">0 / 18</i></span>
+          <p id="obj-text">Arraste cada componente da caixa para o contorno tracejado na placa.</p>
+          <button id="obj-locate" class="btn ghost tiny" title="Dar zoom nos bornes desta ligação" aria-label="Localizar no quadro">
+            <svg class="ic"><use href="#i-target"/></svg><span>Localizar</span></button>
+        </div>
       </div>
       <div id="mission-list" class="missions"></div>
       <div id="test-list" class="missions hidden"></div>
@@ -191,9 +194,17 @@
 
       <div class="statcard">
         <h4>Contatores e proteção</h4>
-        <div class="motorline"><span>K1 — frente</span><strong id="st-k1" class="pill off">desligado</strong></div>
-        <div class="motorline"><span>K2 — ré</span><strong id="st-k2" class="pill off">desligado</strong></div>
-        <div class="motorline"><span>F1 — relé térmico</span><strong id="st-f1" class="pill ok">normal</strong></div>
+        <div class="motorline only-m1"><span>K2 — ré</span><strong id="st-k2" class="pill off">desligado</strong></div>
+        <div class="motorline"><span>K1 — frente / linha</span><strong id="st-k1" class="pill off">desligado</strong></div>
+        <div class="motorline only-m1"><span>F1 — relé térmico</span><strong id="st-f1" class="pill ok">normal</strong></div>
+      </div>
+
+      <div class="statcard only-m2" id="st-drive">
+        <h4>Inversor CFW 500</h4>
+        <div class="motorline"><span>Relé de saída RL1</span><strong id="drv-rl" class="pill ok">RL1 em repouso (NF fechado)</strong></div>
+        <p class="tiny">Comando pelas entradas digitais em 24 V: <b>DI1</b> partida (3 fios), <b>DI2</b> parada,
+           <b>DI3</b> habilitação geral pelo contato 33-34 do K1 e <b>DI4</b> sentido. A referência de
+           velocidade entra no <b>AI1</b> pelo potenciômetro RP1.</p>
       </div>
 
       <div class="statcard">
@@ -208,81 +219,45 @@
     </div>
 
     <div class="tabbody hidden" id="tab-ajuda">
+      <h4 class="helph4">Como jogar</h4>
       <ol class="help">
         <li><b>Etapa 1 — Fixação:</b> arraste os componentes da caixa para os contornos tracejados na placa.</li>
         <li><b>Etapa 2 — Ligação:</b> clique num borne e depois no outro para passar o cabo. A cor segue o
-            potencial elétrico (L1 vermelho, L2 preto, L3 azul) e onde chegam dois ou mais cabos
-            aparece o <b>ponto de junção</b>, como no esquema.</li>
-        <li>A lista de <b>tarefas</b> segue a ordem do esquema elétrico: primeiro o circuito de
-            <b>potência</b>, depois o de <b>comando</b> e por fim a <b>sinalização</b>.</li>
-        <li><b>Etapa 3 — Teste:</b> com a montagem pronta, repita a sequência de funcionamento
-            (energizar, frente, parada, ré, sobrecarga, rearme). Cada passo é conferido na bancada.</li>
-        <li>Na bancada, <b>Q1</b> e <b>Q2</b> alimentam o quadro, <b>S1</b> (frente), <b>S2</b> (ré) e
-            <b>S0</b> (parada). Atalhos de teclado: <b>1</b>, <b>2</b> e <b>0</b>.</li>
-        <li>Se o relé térmico atuar (carga em <b>Sobrecarga</b>), rearme no botão <b>F1</b> e a lâmpada
-            <b>AM SC</b> de falha apaga. Com o motor parado fica acesa a <b>VM MD</b>; em cada marcha
-            acende a verde correspondente (<b>VD ML</b> frente, <b>VD 2R</b> ré).</li>
-        <li>O <b>retorno</b> do comando não é neutro: o Q2 é bipolar, o polo 2 leva a fase L2 ao comando e
-            o polo 1 devolve tudo pela <b>barra de retorno</b> (fase L1) — por isso o comando trabalha em
-            <b>380 V</b>, como no esquema.</li>
-        <li>Montar <b>sem o intertravamento</b> (contatos NF 11-12 cruzados) faz K1 e K2 fecharem juntos e
-            provoca <b>curto-circuito</b> — dá para experimentar no modo livre.</li>
+            potencial elétrico e onde chegam dois ou mais cabos aparece o <b>ponto de junção</b>, como no esquema.</li>
+        <li>A lista de <b>tarefas</b> segue a ordem do projeto: primeiro a <b>potência</b>, depois o
+            <b>comando</b> e por fim a <b>sinalização</b> (no quadro com inversor, o comando em 24 V e a referência).</li>
+        <li><b>Etapa 3 — Teste:</b> com a montagem pronta, siga a sequência de funcionamento. Cada passo é
+            conferido na bancada em tempo real.</li>
+        <li>Na bancada você energiza o quadro (Q1, Q2) e opera os botões. Atalhos: <b>1</b>, <b>2</b> e <b>0</b>.</li>
       </ol>
+
+      <h4 class="helph4">Cores do cabo</h4>
+      <p class="tiny">Cada condutor tem a sua cor, do jeito que se identifica no painel:
+         <b>L1</b> laranja, <b>L2</b> branca, <b>L3</b> azul, <b>+24 V</b> violeta e <b>COM/0 V</b> cinza.
+         A barra de retorno do comando aparece como um trilho e fecha o circuito das bobinas e das lâmpadas.</p>
 
       <h4 class="helph4">Multímetro</h4>
       <p class="tiny">Ligue <b>Medir</b> e clique em dois bornes: o medidor mostra a tensão entre eles
-         (380 V entre fases) e apita quando os dois pontos são o <b>mesmo</b> ponto
-         elétrico (continuidade). Com Q1 e Q2 desligados, a continuidade é o jeito mais rápido de achar
-         fio rompido ou cabo faltando.</p>
+         (380 V entre fases, 24 V no comando do inversor) e apita quando os dois pontos são o <b>mesmo</b>
+         ponto elétrico (continuidade). Com Q1 e Q2 desligados, a continuidade é o jeito mais rápido de
+         achar fio rompido ou cabo faltando.</p>
 
-      <h4 class="helph4">Modo manutenção</h4>
-      <p class="tiny">O botão <b>Manutenção</b> entrega o quadro montado com um <b>defeito escondido</b> e
-         uma ordem de serviço. A lista de tarefas vira o relato do operador: você reproduz o sintoma na
-         bancada, mede com o multímetro e conserta. Para tirar um cabo errado, <b>clique nele</b> na placa
-         e ele é cortado; depois refaça a ligação correta. A O.S. encerra quando a fiação volta a bater
-         com o esquema.</p>
+      <h4 class="helph4">Ordem de serviço (manutenção)</h4>
+      <p class="tiny">O botão <b>Manutenção</b> entrega o quadro montado com um <b>defeito escondido</b>.
+         A lista de tarefas vira o relato do operador: você reproduz o sintoma na bancada, mede com o
+         multímetro e conserta. Para tirar um cabo errado, <b>clique nele</b> na placa e ele é cortado;
+         depois refaça a ligação correta. A O.S. encerra quando a fiação volta a bater com o projeto.</p>
 
       <h4 class="helph4">Navegação do quadro</h4>
       <p class="tiny">Roda do mouse dá <b>zoom</b>, arrastar o fundo <b>move</b> a placa e o botão
-         <b>Localizar</b> aproxima os bornes da ligação atual. No celular, use os botões de zoom e
-         arraste para percorrer o quadro.</p>
+         <b>Localizar</b> aproxima os bornes da ligação atual. No celular, use os botões de zoom.</p>
     </div>
   </aside>
 </main>
 
 <!-- ================================== BANCADA ================================= -->
-<footer id="dock">
-  <div class="dock-group">
-    <span class="dock-title">Alimentação</span>
-    <button id="ctl-q1" class="key">Q1 <b>OFF</b></button>
-    <button id="ctl-q2" class="key">Q2 <b>OFF</b></button>
-  </div>
-
-  <div class="dock-group">
-    <span class="dock-title">Comando</span>
-    <button id="ctl-s1" class="pbtn green">S1<b>FRENTE</b></button>
-    <button id="ctl-s2" class="pbtn dark">S2<b>RÉ</b></button>
-    <button id="ctl-s0" class="pbtn red">S0<b>PARADA</b></button>
-  </div>
-
-  <div class="dock-group">
-    <span class="dock-title">Proteção</span>
-    <button id="ctl-f1" class="key">F1 <b>REARMAR</b></button>
-    <select id="ctl-load" title="Carga do motor">
-      <option value="sem">Sem carga</option>
-      <option value="nominal" selected>Carga nominal</option>
-      <option value="sobrecarga">Sobrecarga ⚠</option>
-    </select>
-  </div>
-
-  <div class="dock-group readout-group">
-    <span class="dock-title">Leitura</span>
-    <div class="readout">
-      <span id="ro-voltage" class="ro">Tensão no comando: <b>0 V</b></span>
-      <span id="ro-msg" class="ro msg">Ligue Q1 e Q2 para energizar o quadro.</span>
-    </div>
-  </div>
-</footer>
+<!-- o conteúdo é montado em js/app.js conforme a missão (buildDock) -->
+<footer id="dock"></footer>
 
 <!-- ==================================== MODAL ================================= -->
 <div id="modal" class="modal hidden">
@@ -292,6 +267,32 @@
       <button class="modal-x" id="modal-x" aria-label="Fechar"><svg class="ic"><use href="#i-close"/></svg></button>
     </div>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ============================== MISSÕES (SERVIÇOS) ========================= -->
+<div id="mselect" class="mselect hidden">
+  <div class="mselect-inner">
+    <header class="mhead">
+      <span class="eyebrow">Bancada de comandos · ordens de serviço</span>
+      <h1>Monte o quadro, energize e ponha o motor para girar.</h1>
+      <p class="mlead">Duas instalações reais de painel: o comando clássico de reversão com contatores e
+         um quadro com inversor de frequência CFW 500. Em cada uma você fixa os componentes, passa o
+         cabeamento seguindo o projeto e fecha com a sequência de testes na bancada.</p>
+      <div class="mhead-acts">
+        <button id="mselect-free" class="btn ghost">Explorar a bancada livre</button>
+      </div>
+    </header>
+    <div id="mselect-list" class="mlist"></div>
+    <footer class="mfoot">
+      <span class="eyebrow">Fluxo de trabalho</span>
+      <div class="msteps">
+        <div><b>01</b> Fixar os componentes na placa</div>
+        <div><b>02</b> Ligar os cabos na ordem do projeto</div>
+        <div><b>03</b> Testar frente, ré, referência e falha</div>
+        <div><b>04</b> Fechar a O.S. no modo manutenção</div>
+      </div>
+    </footer>
   </div>
 </div>
 

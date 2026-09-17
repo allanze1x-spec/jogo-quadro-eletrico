@@ -11,16 +11,18 @@ const boardEl = $('#board');
 const stageEl = $('#stage');
 const wiresEl = $('#wires');
 
-const TERM_POS = {};
-const TERM_DIR = {};
-PARTS.forEach(p => p.terms.forEach(t => {
-  const k = p.id + ':' + t.id;
-  TERM_POS[k] = { x: t.x, y: t.y };
-  TERM_DIR[k] = t.dir;
-}));
-
-const PART_OF_TERM = {};
-PARTS.forEach(p => p.terms.forEach(t => { PART_OF_TERM[p.id + ':' + t.id] = p.id; }));
+/* índice dos bornes do projeto ativo (recalculado a cada troca de missão) */
+const TERM_POS = {}, TERM_DIR = {}, PART_OF_TERM = {};
+function rebuildTermIndex() {
+  [TERM_POS, TERM_DIR, PART_OF_TERM].forEach(o => Object.keys(o).forEach(k => delete o[k]));
+  PARTS.forEach(p => p.terms.forEach(t => {
+    const k = p.id + ':' + t.id;
+    TERM_POS[k] = { x: t.x, y: t.y };
+    TERM_DIR[k] = t.dir;
+    PART_OF_TERM[k] = p.id;
+  }));
+}
+rebuildTermIndex();
 
 /* ---------------------------------- estado -------------------------------- */
 const S = {
@@ -41,6 +43,9 @@ const S = {
   _stage3: false,
   mode: 'esquema',      // 'esquema' | 'manutencao'
   defect: null,
+  projId: 'reversao',   // missão ativa (trocada por startProject)
+  driveFault: false,    // falha rearmável do inversor (F051 na bancada)
+  ref: 0.5,             // posição do potenciômetro RP1 (0..1)
   _fixed: false,
   _repairs: 0,
   started: Date.now(),
@@ -147,15 +152,8 @@ const SFX = (() => {
 
 /* ------------------------------- construção -------------------------------- */
 function buildPaint() {
-  const rails = [
-    { x: 278, y: 190, w: 168 }, { x: 1115, y: 160, w: 138 },
-    { x: 160, y: 505, w: 610 }, { x: 706, y: 820, w: 300 },
-  ];
-  const zones = [
-    { x: 30, y: 20, w: 1000, h: 1150, t: 'CIRCUITO DE POTÊNCIA' },
-    { x: 1060, y: 20, w: 270, h: 580, t: 'COMANDO' },
-    { x: 1060, y: 660, w: 620, h: 560, t: 'SINALIZAÇÃO' },
-  ];
+  /* trilhos e faixas vêm do projeto (data.js) — cada quadro tem o seu desenho */
+  const rails = PAINT.rails, zones = PAINT.zones;
   $('#paint').innerHTML =
     zones.map(z => `<div class="zone" style="left:${z.x}px;top:${z.y}px;width:${z.w}px;height:${z.h}px">
         <span>${z.t}</span></div>`).join('') +
@@ -246,26 +244,185 @@ function roundedPath(pts, r) {
   return d;
 }
 
+/* ============================================================================
+   ROTEAMENTO DOS CABOS — desenho ortogonal, como num painel de verdade
+
+   1. cada cabo sai do borne seguindo a DIREÇÃO do borne (o "stub"), esticado
+      até ficar FORA da peça (e do bloco auxiliar colado nela);
+   2. daí até o stub do outro borne o caminho é achado por A* numa grade de
+      20 px que bloqueia as caixas das peças — o mapa é montado uma vez por
+      projeto e nunca é alterado, então o cabo não atravessa componente;
+   3. corredores já usados custam um pouco mais caro (com teto), o que separa
+      os fios paralelos sem virar desvio longo;
+   4. sem caminho (ou sem mapa) cai no traçado ortogonal simples.
+   ========================================================================== */
 const VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+/* direções na grade: 0 cima · 1 direita · 2 baixo · 3 esquerda */
+const DIR_ID = { up: 0, right: 1, down: 2, left: 3 };
+const DIR_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const GRID = 20;
+
+let RMAP = null, RCACHE = {}, RUSE = null;
+
+/** mapa de obstáculos: caixas das peças (infladas) + borda do palco */
+function buildRouteMap() {
+  const cols = Math.ceil(STAGE.w / GRID) + 1, rows = Math.ceil(STAGE.h / GRID) + 1;
+  const blocked = new Uint8Array(cols * rows);
+  const pad = 4;
+  PARTS.forEach(p => {
+    if (p.kind === 'bus') return;              // a barra de retorno é um trilho: pode passar por baixo
+    const ax = Math.floor((p.x - pad) / GRID), ay = Math.floor((p.y - pad) / GRID);
+    const bx = Math.ceil((p.x + p.w + pad) / GRID), by = Math.ceil((p.y + p.h + pad) / GRID);
+    for (let y = Math.max(0, ay); y <= Math.min(rows - 1, by); y++)
+      for (let x = Math.max(0, ax); x <= Math.min(cols - 1, bx); x++) blocked[y * cols + x] = 1;
+  });
+  for (let x = 0; x < cols; x++) { blocked[x] = 1; blocked[(rows - 1) * cols + x] = 1; }
+  for (let y = 0; y < rows; y++) { blocked[y * cols] = 1; blocked[y * cols + cols - 1] = 1; }
+  RMAP = { cols, rows, blocked };
+  RCACHE = {};
+}
+
+/** o ponto está dentro de alguma peça (ou do bloco auxiliar dela)? */
+function dentroDePeca(q) {
+  return PARTS.some(p => p.kind !== 'bus' &&
+    q.x > p.x - 4 && q.x < p.x + p.w + 4 && q.y > p.y - 4 && q.y < p.y + p.h + 4);
+}
+
+/**
+ * Stub de um borne: sai na direção declarada do borne e estica até estar em
+ * área livre. É o que permite o cabo nascer de dentro da peça (como os bornes
+ * desenhados sobre o componente) sem abrir caminho por cima dela.
+ */
+function stubOut(termKey, min) {
+  const A = TERM_POS[termKey];
+  const d = VEC[TERM_DIR[termKey] || 'down'];
+  let k = min;
+  let q = { x: A.x + d[0] * k, y: A.y + d[1] * k };
+  while (k < 460 && dentroDePeca(q)) { k += GRID; q = { x: A.x + d[0] * k, y: A.y + d[1] * k }; }
+  return q;
+}
+
+/** A* com penalidade de curva e de corredor já ocupado */
+function aStar(from, to, dir0) {
+  const { cols, rows, blocked } = RMAP;
+  const cl = (v, n) => Math.max(1, Math.min(n - 2, v));
+  const sx = cl(Math.round(from.x / GRID), cols), sy = cl(Math.round(from.y / GRID), rows);
+  const gx = cl(Math.round(to.x / GRID), cols), gy = cl(Math.round(to.y / GRID), rows);
+  if (blocked[sy * cols + sx] || blocked[gy * cols + gx]) return null;
+
+  const N = cols * rows * 4;
+  const g = new Float32Array(N).fill(1e9);
+  const back = new Int32Array(N).fill(-1);
+  const seen = new Uint8Array(N);
+  const id = (x, y, d) => (y * cols + x) * 4 + d;
+  const h = (x, y) => (Math.abs(x - gx) + Math.abs(y - gy)) * GRID;
+
+  const heap = [];
+  const push = (node, f) => {
+    heap.push([f, node]);
+    let i = heap.length - 1;
+    while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break;
+      const t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1, r = l + 1; let m = i;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === i) break;
+        const t = heap[m]; heap[m] = heap[i]; heap[i] = t; i = m;
+      }
+    }
+    return top[1];
+  };
+
+  const start = id(sx, sy, dir0);
+  g[start] = 0; push(start, h(sx, sy));
+  let goal = -1;
+  while (heap.length) {
+    const node = pop();
+    if (seen[node]) continue;
+    seen[node] = 1;
+    const d = node & 3, cell = node >> 2, x = cell % cols, y = (cell - x) / cols;
+    if (x === gx && y === gy) { goal = node; break; }
+    for (let nd = 0; nd < 4; nd++) {
+      if (nd === (d + 2) % 4) continue;              // não volta por onde veio
+      const nx = x + DIR_VEC[nd][0], ny = y + DIR_VEC[nd][1];
+      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+      if (blocked[ny * cols + nx]) continue;
+      /* corredor já usado: no máximo 9 px por célula — separa os fios
+         paralelos sem empurrar o cabo para um desvio longo */
+      const custo = GRID + (nd === d ? 0 : 24) +
+        (RUSE ? Math.min(RUSE[ny * cols + nx], 3) * 3 : 0);
+      const nn = id(nx, ny, nd);
+      if (g[node] + custo < g[nn]) { g[nn] = g[node] + custo; back[nn] = node; push(nn, g[nn] + h(nx, ny)); }
+    }
+  }
+  if (goal < 0) return null;
+  const cells = [];
+  for (let n = goal; n >= 0; n = back[n]) {
+    const c = n >> 2, x = c % cols;
+    cells.push([x, (c - x) / cols]);
+  }
+  cells.reverse();
+  return cells;
+}
+
+/** traçado ortogonal simples (usado quando o A* não acha caminho) */
+function simplePath(A, p1, q1, B, off, da, db) {
+  if (da[0] !== 0 && db[0] !== 0) {
+    const mx = (p1.x + q1.x) / 2 + (off || 0);
+    return [A, p1, { x: mx, y: p1.y }, { x: mx, y: q1.y }, q1, B];
+  }
+  if (da[0] !== 0 || db[0] !== 0) return [A, p1, { x: q1.x, y: p1.y }, q1, B];
+  const my = (p1.y + q1.y) / 2 + (off || 0);
+  return [A, p1, { x: p1.x, y: my }, { x: q1.x, y: my }, q1, B];
+}
+
+/** tira pontos repetidos e colineares (deixa só as dobras) */
+function simplifyPath(pts) {
+  const clean = [];
+  pts.forEach(p => {
+    const l = clean[clean.length - 1];
+    if (!l || Math.abs(l.x - p.x) > .5 || Math.abs(l.y - p.y) > .5) clean.push(p);
+  });
+  if (clean.length < 3) return clean;
+  const out = [clean[0]];
+  for (let i = 1; i < clean.length - 1; i++) {
+    const a = out[out.length - 1], b = clean[i], c = clean[i + 1];
+    const reto = (Math.abs(a.x - b.x) < .5 && Math.abs(b.x - c.x) < .5) ||
+      (Math.abs(a.y - b.y) < .5 && Math.abs(b.y - c.y) < .5);
+    if (!reto) out.push(b);
+  }
+  out.push(clean[clean.length - 1]);
+  return out;
+}
 
 function wirePath(a, b, off) {
   const A = TERM_POS[a], B = TERM_POS[b];
+  const key = a + '|' + b;
   if (!A || !B) return '';
+  if (RCACHE[key]) return RCACHE[key];
   const da = VEC[TERM_DIR[a] || 'down'], db = VEC[TERM_DIR[b] || 'down'];
-  const st = 34;
-  const p1 = { x: A.x + da[0] * st, y: A.y + da[1] * st };
-  const q1 = { x: B.x + db[0] * st, y: B.y + db[1] * st };
-  let pts;
-  if (da[0] !== 0 && db[0] !== 0) {
-    const mx = (p1.x + q1.x) / 2 + off;
-    pts = [A, p1, { x: mx, y: p1.y }, { x: mx, y: q1.y }, q1, B];
-  } else if (da[0] !== 0 || db[0] !== 0) {
-    pts = [A, p1, { x: q1.x, y: p1.y }, q1, B];
-  } else {
-    const my = (p1.y + q1.y) / 2 + off;
-    pts = [A, p1, { x: p1.x, y: my }, { x: q1.x, y: my }, q1, B];
+  const p1 = stubOut(a, 26);
+  const q1 = stubOut(b, 26);
+  let pts = null;
+  if (RMAP) {
+    const cells = (typeof aStar === 'function') ? aStar(p1, q1, DIR_ID[TERM_DIR[a] || 'down']) : null;
+    if (cells && cells.length > 1) {
+      const wp = cells.slice(1, -1).map(([cx, cy]) => ({ x: cx * GRID, y: cy * GRID }));
+      pts = [A, p1].concat(wp, [q1, B]);
+      if (RUSE) cells.forEach(([cx, cy]) => { RUSE[cy * RMAP.cols + cx] += 1; });
+    }
   }
-  return roundedPath(pts, 14);
+  if (!pts) pts = simplePath(A, p1, q1, B, off, da, db);
+  const d = roundedPath(simplifyPath(pts), 12);
+  RCACHE[key] = d;
+  return d;
 }
 
 function renderWires() {
@@ -276,6 +433,7 @@ function renderWires() {
   // barra de retorno: todos os bornes são o MESMO ponto elétrico → desenha o trilho
   const bus = PART_BY_ID.RET;
   if (S.placed.RET) out.push(`<polyline class="busbar" points="${bus.terms.map(t => t.x + ',' + t.y).join(' ')}"/>`);
+  RUSE = new Float32Array(RMAP ? RMAP.cols * RMAP.rows : 1);
   S.wires.forEach((w, i) => {
     const off = ((i % 5) - 2) * 7;
     const col = res ? wireColor(res.net, w.a) : '#4b5563';
@@ -335,40 +493,35 @@ function renderPane() {
   $('#mission-list').classList.toggle('hidden', teste);
   $('#test-list').classList.toggle('hidden', !teste);
 
-  let title, count, pct, sub, objStep, objCount, objText;
+  let title, count, pct, objStep, objCount, objText;
   if (manut) {
     const d = S.defect;
     title = 'Ordem de serviço'; count = S._fixed ? '1 / 1' : '0 / 1'; pct = S._fixed ? 100 : 0;
-    sub = 'Diagnostique o defeito pelos sintomas e devolva a fiação ao esquema.';
     objStep = 'Manutenção'; objCount = d ? d.os : '';
     objText = d ? d.sintoma : '';
   } else if (S.etapa === 1) {
     const feitos = Object.keys(S.placed).length, total = PARTS.length;
     title = 'Etapa 1 — Fixar componentes'; count = `${feitos} / ${total}`; pct = feitos / total * 100;
-    sub = 'Arraste cada peça da caixa de componentes para o contorno tracejado dela na placa.';
-    objStep = 'Etapa 1'; objCount = `${feitos} / ${total}`;
+    objStep = 'Fixar'; objCount = `${feitos} / ${total}`;
     objText = feitos ? 'Continue fixando os componentes que faltam na placa.'
       : 'Arraste os componentes da caixa para os contornos tracejados da placa.';
   } else if (S.etapa === 2) {
     const cur = currentMission();
     title = 'Etapa 2 — Ligar os cabos'; count = `${S.done.size} / ${MISSIONS.length}`;
     pct = S.done.size / MISSIONS.length * 100;
-    sub = 'Clique num borne e depois no outro para passar o cabo. A cor segue o potencial elétrico.';
     objStep = `Ligação ${Math.min(S.done.size + 1, MISSIONS.length)}`;
-    objCount = SEC_LABEL[cur ? cur.m.sec : 'sig'];
+    objCount = SECTIONS[cur ? cur.m.sec : Object.keys(SECTIONS)[0]] || '';
     objText = cur ? `${missionLabel(cur.i)} — ${cur.m.hint}` : 'Montagem concluída!';
   } else {
     const cur = currentTest();
-    title = 'Etapa 3 — Teste de funcionamento'; count = `${S.testDone.size} / ${TEST_STEPS.length}`;
-    pct = S.testDone.size / TEST_STEPS.length * 100;
-    sub = 'Repita a sequência do esquema: energizar, frente, parada, ré, sobrecarga e rearme.';
-    objStep = 'Teste'; objCount = `${S.testDone.size} / ${TEST_STEPS.length}`;
+    title = 'Etapa 3 — Teste de funcionamento'; count = `${S.testDone.size} / ${TESTS.length}`;
+    pct = S.testDone.size / TESTS.length * 100;
+    objStep = 'Teste'; objCount = `${S.testDone.size} / ${TESTS.length}`;
     objText = cur ? `${cur.title}: ${cur.task}` : 'Sequência de funcionamento concluída.';
   }
   $('#pane-title').textContent = title;
   $('#pane-count').textContent = count;
   $('#pane-bar').style.width = pct + '%';
-  $('#pane-sub').textContent = sub;
   $('#obj-etapa').textContent = objStep;
   $('#obj-count').textContent = objCount;
   $('#obj-text').textContent = objText;
@@ -410,7 +563,7 @@ function renderMissions() {
   const cur = currentMission();
   const fmt = k => k.endsWith(':*') ? k.slice(0, -2) + ':*' : k;
   MISSIONS.forEach((m, i) => {
-    if (m.sec !== lastSec) { lastSec = m.sec; list.push(`<div class="sec-head">${SEC_LABEL[m.sec]}</div>`); }
+    if (m.sec !== lastSec) { lastSec = m.sec; list.push(`<div class="sec-head">${SECTIONS[m.sec] || m.sec}</div>`); }
     const done = S.done.has(i), atual = cur && cur.i === i;
     const cls = done ? 'done' : (atual ? 'current' : '');
     if (atual) lastSub = i;
@@ -441,61 +594,39 @@ function paintTargets() {
   });
 }
 
-function coachShow(title, msg) {
+/*
+ * Aviso da bancada. Ele fica NO CANTO do quadro (nunca no meio da placa, onde
+ * atrapalharia a montagem) e se fecha sozinho: mensagem de rotina some rápido,
+ * aviso importante fica mais tempo. O que o jogador precisa fazer AGORA está
+ * sempre na faixa de objetivo e na lista de tarefas — o aviso é só reforço.
+ */
+let coachTimer = 0;
+function coachShow(title, msg, ms) {
   $('#coach-title').textContent = title;
   $('#coach-desc').textContent = msg;
-  $('#coach').classList.remove('hidden');
+  const el = $('#coach');
+  el.classList.remove('hidden');
+  el.classList.toggle('info', false);
+  clearTimeout(coachTimer);
+  coachTimer = setTimeout(hideCoach, ms === undefined ? 5200 : ms);
+}
+function hideCoach() {
+  clearTimeout(coachTimer);
+  $('#coach').classList.add('hidden');
 }
 
-/* ---------------- etapa 3 — teste de funcionamento (do esquema) ----------- */
-/* Repete a sequela "Funcionamento" do esquema. Cada passo é conferido na
-   bancada: S1 → K1 (frente) · S0 → parada · S2 → K2 (ré) · sobrecarga → F1. */
-const TEST_STEPS = [
-  {
-    id: 'energ', title: 'Energizar o circuito de comando',
-    task: 'Ligue Q1 e depois Q2 na bancada.',
-    why: 'Com o Q2 fechado a fase L2 chega ao relé F1 e à barra das lâmpadas, e o polo 1 fecha o retorno. Com tudo parado acende a VM MD (motor desligado).',
-    ok: res => S.q1 && S.q2 && !S.f1Tripped && res.lamps.H2 && !res.lamps.H1,
-  },
-  {
-    id: 'frente', title: 'Partida frente — S1',
-    task: 'Aperte S1 (botão verde ou tecla 1).',
-    why: 'K1 energiza pelo contato NF 11-12 do K2, o motor gira no sentido horário e a verde VD ML acende (a VM MD apaga).',
-    ok: res => res.coils.K1 && !res.coils.K2 && res.motor.dir > 0 && res.lamps.H3 && !res.lamps.H2,
-  },
-  {
-    id: 'parada', title: 'Parada — S0',
-    task: 'Aperte S0 (botão vermelho ou tecla 0).',
-    why: 'O NF do S0 abre o circuito do comando: os contatores caem, o motor para e a lâmpada VM MD volta a acender.',
-    ok: res => !res.coils.K1 && !res.coils.K2 && res.motor.state === 'parado' && res.lamps.H2,
-  },
-  {
-    id: 're', title: 'Partida ré — S2',
-    task: 'Aperte S2 (botão preto ou tecla 2).',
-    why: 'Agora é o K2 que energiza: as saídas 2 e 6 do K2 trocam as fases, o motor gira ao contrário e a verde VD 2R acende.',
-    ok: res => res.coils.K2 && !res.coils.K1 && res.motor.dir < 0 && res.lamps.H4,
-  },
-  {
-    id: 'sobrecarga', title: 'Proteção por sobrecarga — F1',
-    task: 'Com o motor girando, selecione a carga “Sobrecarga ⚠” e espere o relé atuar.',
-    why: 'O contato 95-96 abre (desliga os contatores) e o 97-98 fecha, acendendo a lâmpada AM SC de falha.',
-    ok: res => S.f1Tripped && res.motor.state === 'parado' && res.lamps.H1,
-  },
-  {
-    id: 'rearme', title: 'Rearme do relé térmico',
-    task: 'Aperte REARMAR no F1 e volte a carga para “Carga nominal”.',
-    why: 'Rearmado, o 95-96 fecha de novo, o 97-98 abre e a lâmpada de falha apaga — o quadro volta a funcionar.',
-    ok: res => !S.f1Tripped && !res.lamps.H1,
-  },
-];
-
+/* ---------------- etapa 3 — teste de funcionamento ------------------------
+   Cada missão traz a sua sequência em data.js (TESTS): a do quadro de
+   reversão repete a seção "Funcionamento" do esquema e a do inversor segue as
+   funções do drive (marcha, referência, sentido, parada, falha e reset).
+   Cada passo é conferido na bancada, em tempo real. */
 function currentTest() {
-  return TEST_STEPS.find(s => !S.testDone.has(s.id)) || null;
+  return TESTS.find(s => !S.testDone.has(s.id)) || null;
 }
 
 function renderTests() {
   const cur = currentTest();
-  $('#test-list').innerHTML = TEST_STEPS.map((s, i) => {
+  $('#test-list').innerHTML = TESTS.map((s, i) => {
     const done = S.testDone.has(s.id);
     const cls = done ? 'done' : (cur && cur.id === s.id ? 'current' : '');
     return `<div class="mission ${cls}" data-tid="${s.id}">
@@ -512,14 +643,14 @@ function renderTests() {
 function evalTests(res) {
   const cur = currentTest();
   if (!cur) return;
-  if (!cur.ok(res)) return;
+  if (!cur.ok(S, res)) return;
   S.testDone.add(cur.id);
   S.score += 15;
   SFX.ok(); flashScore();
   logMsg('ok', `✔ ${cur.title} — ${cur.why}`);
   renderTests();
   const nx = currentTest();
-  if (nx) coachShow(`Teste ${S.testDone.size}/${TEST_STEPS.length}`, nx.task);
+  if (nx) coachShow(`Teste ${S.testDone.size}/${TESTS.length}`, nx.task);
   else {
     coachShow('Sequência de funcionamento concluída!', 'Você montou e operou o quadro exatamente como no esquema.');
     if (!S._celebrated) { S._celebrated = true; setTimeout(celebrate, 700); }
@@ -724,7 +855,7 @@ function makeWire(a, b) {
     // mesmo componente é permitido (ex.: Q1:1 -> Q1:2), só evita duplicar
   }
   if (S.wires.some(w => (w.a === a && w.b === b) || (w.a === b && w.b === a))) {
-    coachShow('Já ligado', 'Já existe um cabo entre esses dois bornes.');
+    coachShow('Já ligado', 'Já existe um cabo entre esses dois bornes.', 3200);
     SFX.err(); return;
   }
   // qual missão casa?
@@ -736,7 +867,7 @@ function makeWire(a, b) {
     if (mi === null || (cur && mi !== cur.i)) {
       S.errors++;
       flashTerm(b); SFX.err();
-      coachShow('Ops!', `Não é essa ligação agora. ${cur ? 'A missão é: ' + missionLabel(cur.i) : ''}`);
+      coachShow('Ops!', `Não é essa ligação agora. ${cur ? 'A missão é: ' + missionLabel(cur.i) : ''}`, 4200);
       return;
     }
   }
@@ -748,10 +879,14 @@ function makeWire(a, b) {
   } else if (mi === null) {
     S.score = Math.max(0, S.score - 2);
   }
+  /* ligação correta é rotina: nada de aviso em cima da placa — o avanço aparece
+     na lista de tarefas, na barra de objetivo, no ponto e no som. O aviso fica
+     só para o que foge do normal (ligação errada, cabo repetido) e para o fim
+     da montagem. */
   renderMissions(); paintTargets(); refresh();
-  const cur = currentMission();
-  if (cur) coachShow('Ligação ' + (S.done.size) + '/' + MISSIONS.length, cur.m.hint);
-  else coachShow('Montagem concluída!', 'Ligue Q1 e Q2 e aperte S1 ou S2 para fazer o motor girar.');
+  if (!currentMission()) {
+    coachShow('Montagem concluída!', 'Ligue Q1 e Q2 e aperte S1 ou S2 para fazer o motor girar.', 9000);
+  }
 }
 
 function flashTerm(k) {
@@ -771,7 +906,10 @@ function flashScore() {
 function refresh() {
   const res = solve(S, S.wires, S._coils);
   S.res = res;
-  S._coils = { K1: res.coils.K1, K2: res.coils.K2 };
+  /* a memória viaja para o próximo ciclo: as bobinas do contator E as
+     memórias internas do inversor (RUN) — sem isto o drive pararia ao soltar
+     o botão de marcha */
+  S._coils = Object.assign({}, res.coils);
 
   const wasK1 = S._k1, wasK2 = S._k2;
   if (wasK1 !== undefined && (wasK1 !== res.coils.K1 || wasK2 !== res.coils.K2)) SFX.clack();
@@ -797,34 +935,95 @@ function refresh() {
 }
 
 function applyVisual(res) {
-  ['K1', 'K2'].forEach(k => {
-    const el = $(`.part[data-part="${k}"]`);
-    el?.classList.toggle('energized', res.coils[k]);
+  // bobinas do projeto (contatores; no inversor a memória de RUN é interna)
+  COILS.forEach(c => {
+    const el = $(`.part[data-part="${c.id}"]`);
+    if (el) el.classList.toggle('energized', !!res.coils[c.id]);
   });
-  ['H1', 'H2', 'H3', 'H4'].forEach(h => {
-    const el = $(`.part[data-part="${h}"]`);
+  // lâmpadas de sinalização do projeto
+  LAMPS.forEach(l => {
+    const el = $(`.part[data-part="${l.id}"]`);
     if (!el) return;
-    const on = res.lamps[h];
-    el.classList.toggle('lamp-on', on);
-    const c = { H1: '#ffd12e', H2: '#ff4d3d', H3: '#39e07a', H4: '#39e07a' }[h];
-    el.style.setProperty('--glow', c);
+    el.classList.toggle('lamp-on', !!res.lamps[l.id]);
+    el.style.setProperty('--glow', l.c);
   });
+  // eixo do motor: a velocidade acompanha a frequência do inversor
   const m = $('.part[data-part="M1"]');
   if (m) {
     let sp = m.querySelector('.shaft');
     if (!sp) {
       sp = document.createElement('div');
       sp.className = 'shaft';
-      sp.style.cssText = 'position:absolute;right:-28px;top:74px;width:56px;height:56px;border-radius:50%;' +
+      sp.style.cssText = 'position:absolute;left:-34px;top:60px;width:56px;height:56px;border-radius:50%;' +
         'border:5px dashed rgba(40,60,80,.55);opacity:0;transition:opacity .2s';
       m.appendChild(sp);
     }
     const on = res.motor.state === 'girando';
+    const vel = clamp((res.motor.hz || 0) / 60, .12, 1);
     sp.style.opacity = on ? '1' : '0';
-    sp.style.animation = on ? `spin ${res.motor.dir > 0 ? 1 : 1}s linear infinite` : 'none';
+    sp.style.animation = on ? `spin ${(1.7 - 1.35 * vel).toFixed(2)}s linear infinite` : 'none';
     sp.style.animationDirection = res.motor.dir > 0 ? 'normal' : 'reverse';
-    sp.style.borderColor = on ? (res.motor.dir > 0 ? 'rgba(46,204,113,.85)' : 'rgba(255,170,40,.9)') : 'transparent';
+    sp.style.borderColor = on ? (res.motor.dir > 0 ? 'rgba(111,240,174,.85)' : 'rgba(255,194,133,.9)') : 'transparent';
   }
+  if (VFD) updateHMI(res);
+}
+
+/* ---------------------- painel (display) do inversor ---------------------- */
+/* O que o operador vê na frente do drive: frequência, estado e os LEDs das
+   entradas digitais. O mesmo conteúdo vai para o HMI do quadro (dentro da peça)
+   e para os elementos do painel lateral e da bancada. */
+function hmiState(res) {
+  const d = res.dev || {};
+  if (d.fault) return { hz: '000.0', st: 'F051 FALHA', cls: 'fault' };
+  if (!d.run) {
+    if (d.faseFaltando) return { hz: '----', st: 'F022 FALTA FASE', cls: 'fault' };
+    if (!d.powered) return { hz: '----', st: 'SEM TENSÃO', cls: 'off' };
+    return d.enabled
+      ? { hz: '000.0', st: 'READY', cls: 'ready' }
+      : { hz: '000.0', st: 'SEM HABILITAÇÃO', cls: 'off' };
+  }
+  if (d.ref <= 0.001) return { hz: '000.0', st: 'RUN SEM REFERÊNCIA', cls: 'warn' };
+  return { hz: d.hz.toFixed(1).padStart(5, '0'), st: d.rev ? 'RUN  REV' : 'RUN  FWD', cls: 'run' };
+}
+
+function updateHMI(res) {
+  if (!VFD) return;
+  const h = hmiState(res);
+  const el = $('.part[data-part="' + VFD.part + '"]');
+  if (el && !el.querySelector('.hmi')) {
+    el.insertAdjacentHTML('beforeend', `<div class="hmi">
+        <div class="hmi-hz"><span></span><small>Hz</small></div>
+        <div class="hmi-st"></div>
+        <div class="hmi-di">${['DI1', 'DI2', 'DI3', 'DI4'].map(k => `<i data-di="${k}">${k.slice(2)}</i>`).join('')}</div>
+      </div>`);
+  }
+  if (el) {
+    el.querySelector('.hmi .hmi-hz span').textContent = h.hz;
+    const st = el.querySelector('.hmi .hmi-st');
+    st.textContent = h.st;
+    st.dataset.k = h.cls;
+    el.querySelectorAll('.hmi-di i').forEach(i => {
+      const k = i.dataset.di.toLowerCase();
+      i.classList.toggle('on', !!(res.dev && res.dev.di && res.dev.di[k]));
+    });
+  }
+  // painel lateral / bancada
+  const hz = $('#drv-hz-2'); if (hz) hz.textContent = h.hz;
+  const st2 = $('#drv-st-2'); if (st2) { st2.textContent = h.st; st2.dataset.k = h.cls; }
+  // LEDs das entradas digitais (bancada e painel lateral)
+  const MAPA_DI = { di1: 'start', di2: 'stop', di3: 'enable', di4: 'dir' };
+  Object.keys(MAPA_DI).forEach(k => {
+    const led = document.querySelectorAll('#di-' + k + ', .hmi-di i[data-di="' + k.toUpperCase() + '"]');
+    led.forEach(n => n.classList.toggle('on', !!(res.dev && res.dev.di && res.dev.di[MAPA_DI[k]])));
+  });
+  const rl = $('#drv-rl');
+  if (rl) {
+    const falha = !!(res.dev && res.dev.fault);
+    rl.textContent = falha ? 'RL1 comutado (falha)' : 'RL1 em repouso (NF fechado)';
+    rl.className = 'pill ' + (falha ? 'err' : 'ok');
+  }
+  const ro = $('#drv-ref');
+  if (ro) ro.textContent = (S.ref * 100).toFixed(0) + ' % · ' + ((S.ref * (VFD.fmax || 60))).toFixed(0) + ' Hz';
 }
 
 /* --------------------------------- HUD ------------------------------------ */
@@ -834,7 +1033,7 @@ function updateUI(res) {
   const prog = manut
     ? { n: S._fixed ? 1 : 0, t: 1 }
     : (S.etapa === 3
-      ? { n: S.testDone.size, t: TEST_STEPS.length }
+      ? { n: S.testDone.size, t: TESTS.length }
       : { n: S.done.size, t: MISSIONS.length });
   $('#hud-progress').textContent = `${prog.n} / ${prog.t}`;
   $('#hud-bar').style.width = (prog.n / prog.t * 100) + '%';
@@ -844,59 +1043,76 @@ function updateUI(res) {
     : (S.etapa === 1 ? '1 / 3 — Fixar componentes'
       : S.etapa === 2 ? '2 / 3 — Ligar os cabos' : '3 / 3 — Teste de funcionamento');
 
+  const ms = res.motor.state;
   $('#st-motor').textContent = {
-    'parado': 'Motor parado', 'girando': 'Motor girando', 'falta-fase': 'Não parte (falta fase)',
-  }[res.motor.state];
-  $('#st-rot').textContent = res.motor.state === 'girando'
+    'parado': 'Motor parado', 'girando': 'Motor girando',
+    'falta-fase': 'Não parte (falta fase)', 'sem-ref': 'Em RUN sem referência de velocidade',
+  }[ms] || ms;
+  $('#st-rot').textContent = ms === 'girando'
     ? (res.motor.dir > 0 ? 'sentido horário (frente)' : 'sentido anti-horário (ré)') : '—';
 
-  const k1 = $('#st-k1'), k2 = $('#st-k2');
-  k1.textContent = res.coils.K1 ? 'energizado' : 'desligado';
-  k1.className = 'pill ' + (res.coils.K1 ? 'on' : 'off');
-  k2.textContent = res.coils.K2 ? 'energizado' : 'desligado';
-  k2.className = 'pill ' + (res.coils.K2 ? 'on' : 'off');
+  // contatores do projeto
+  COILS.forEach(c => {
+    if (c.fn) return;                        // memória interna do inversor (RUN)
+    const el = $('#st-' + c.id.toLowerCase());
+    if (!el) return;
+    el.textContent = res.coils[c.id] ? 'energizado' : 'desligado';
+    el.className = 'pill ' + (res.coils[c.id] ? 'on' : 'off');
+  });
 
   const f1 = $('#st-f1');
-  f1.textContent = S.f1Tripped ? 'ATUADO (sobrecarga)' : 'normal';
-  f1.className = 'pill ' + (S.f1Tripped ? 'err' : 'ok');
+  if (f1) {
+    f1.textContent = S.f1Tripped ? 'ATUADO (sobrecarga)' : 'normal';
+    f1.className = 'pill ' + (S.f1Tripped ? 'err' : 'ok');
+  }
 
-  const lampDef = [['H1', 'AM SC · falha', '#ffd12e'], ['H2', 'VM MD · parado', '#ff4d3d'],
-  ['H3', 'VD ML · frente', '#39e07a'], ['H4', 'VD 2R · ré', '#39e07a']];
-  $('#st-lamps').innerHTML = lampDef.map(([id, nm, c]) =>
-    `<div class="lamp ${res.lamps[id] ? 'on' : ''}" style="--c:${c}">
-       <div class="bulb"></div>${nm}</div>`).join('');
+  $('#st-lamps').innerHTML = LAMPS.map(l =>
+    `<div class="lamp ${res.lamps[l.id] ? 'on' : ''}" style="--c:${l.c}">
+       <div class="bulb"></div>${l.tag} · ${l.name}</div>`).join('');
 
-  // motor sidebar
+  // motor (painel lateral)
   const svg = $('#motor-svg');
-  svg.classList.toggle('on', res.motor.state === 'girando');
-  svg.classList.toggle('fault', res.motor.state === 'falta-fase' || res.short);
+  svg.classList.toggle('on', ms === 'girando');
+  svg.classList.toggle('fault', ms === 'falta-fase' || res.short);
   $('#motor-txt').textContent = S.short ? 'CURTO'
-    : (res.motor.state === 'girando' ? (res.motor.dir > 0 ? 'FWD' : 'REV')
-      : (res.motor.state === 'falta-fase' ? 'FAULT' : 'OFF'));
+    : (ms === 'girando' ? (res.motor.dir > 0 ? 'FWD' : 'REV')
+      : (ms === 'falta-fase' ? 'FAULT' : (ms === 'sem-ref' ? '0 Hz' : 'OFF')));
   const rotor = $('#motor-rotor');
   rotor.style.transformOrigin = '60px 60px';
-  rotor.style.animation = res.motor.state === 'girando'
-    ? `spin ${res.motor.dir > 0 ? 1.1 : 1.1}s linear infinite` : 'none';
+  const vel = clamp((res.motor.hz || 0) / 60, .12, 1);
+  rotor.style.animation = ms === 'girando'
+    ? `spin ${(1.9 - 1.5 * vel).toFixed(2)}s linear infinite` : 'none';
   rotor.style.animationDirection = res.motor.dir > 0 ? 'normal' : 'reverse';
 
   // bancada
-  const ctrlLive = !S.f1Tripped && S.q2;
-  $('#ro-voltage').innerHTML = `Tensão no comando: <b>${ctrlLive ? '380 V entre L1 e L2' : '0 V'}</b>`;
+  const ctrlLive = S.q2 && !S.f1Tripped && !(res.dev && res.dev.fault);
+  const rov = $('#ro-voltage');
+  if (rov) rov.innerHTML = VFD
+    ? `Comando: <b>${ctrlLive ? '380 V' : '0 V'}</b> · fonte do inversor: <b>24 Vcc</b>`
+    : `Tensão no comando: <b>${ctrlLive ? '380 V entre L1 e L2' : '0 V'}</b>`;
   const rv2 = $('#ro-voltage2'); if (rv2) rv2.textContent = ctrlLive ? '380 V' : '0 V';
-  let msg = 'Ligue Q1 e Q2 para energizar o quadro.';
+  let msg;
   if (S.short) msg = 'Curto-circuito detectado: rearme o disjuntor depois de corrigir a fiação.';
   else if (S.f1Tripped) msg = 'Relé térmico atuou. Aperte REARMAR no F1 e reduza a carga.';
-  else if (res.motor.state === 'girando') msg = res.motor.dir > 0
-    ? 'Motor girando no sentido horário (K1 / frente).' : 'Motor girando no sentido anti-horário (K2 / ré).';
-  else if (res.motor.state === 'falta-fase') msg = 'O motor não parte: falta uma fase ou há fio trocado.';
-  else if (S.q1 && S.q2) msg = 'Quadro energizado. Aperte S1 (frente) ou S2 (ré).';
-  $('#ro-msg').textContent = msg;
+  else if (res.dev && res.dev.fault) msg = 'Inversor em falha (F051). Anote o código, reduza a carga e aperte RESET no painel do drive.';
+  else if (ms === 'girando') msg = VFD
+    ? `Inversor em ${res.dev.rev ? 'REV' : 'FWD'} a ${res.motor.hz.toFixed(1)} Hz (${(S.ref * 100).toFixed(0)} % da referência).`
+    : (res.motor.dir > 0 ? 'Motor girando no sentido horário (K1 / frente).' : 'Motor girando no sentido anti-horário (K2 / ré).');
+  else if (ms === 'sem-ref') msg = 'Inversor em RUN com 0,0 Hz: a referência de velocidade não está chegando no AI1.';
+  else if (ms === 'falta-fase') msg = VFD ? 'Falta uma fase na saída do inversor (cabo do motor aberto).' : 'O motor não parte: falta uma fase ou há fio trocado.';
+  else if (S.q1 && S.q2) msg = VFD ? 'Quadro energizado. Aperte S1 para fechar o contator e dar partida no inversor.' : 'Quadro energizado. Aperte S1 (frente) ou S2 (ré).';
+  else msg = 'Ligue Q1 e Q2 para energizar o quadro.';
+  const rom = $('#ro-msg');
+  if (rom) rom.textContent = msg;
 
-  // botões da bancada
-  $('#ctl-q1').classList.toggle('on', S.q1);
-  $('#ctl-q1').querySelector('b').textContent = S.q1 ? 'LIGADO' : 'OFF';
-  $('#ctl-q2').classList.toggle('on', S.q2);
-  $('#ctl-q2').querySelector('b').textContent = S.q2 ? 'LIGADO' : 'OFF';
+  // interruptores da bancada (o rótulo muda por projeto)
+  ['q1', 'q2'].forEach(id => {
+    const c = $('#ctl-' + id);
+    if (!c) return;
+    c.classList.toggle('on', !!S[id]);
+    const bb = c.querySelector('b');
+    if (bb) bb.textContent = S[id] ? 'LIGADO' : 'OFF';
+  });
 
   // som do motor
   if (res.motor.state === 'girando') SFX.humOn(); else SFX.humOff();
@@ -997,19 +1213,38 @@ function applyView() {
   boardEl.style.transform = `translate(${VIEW.tx}px,${VIEW.ty}px) scale(${VIEW.z})`;
   $('#zoom-val').textContent = Math.round(VIEW.z * 100) + '%';
 }
+/*
+ * Área útil do quadro: a caixa de componentes é uma faixa embaixo (telas em pé)
+ * ou uma coluna à esquerda (telas largas). O ajuste, o zoom e o foco usam só o
+ * que sobra — é isso que faz a placa ocupar a tela inteira em qualquer formato.
+ * Coordenadas em relação ao canto superior esquerdo do #board-wrap.
+ */
+function viewArea() {
+  const wrap = $('#board-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const t = $('#tray');
+  let left = 0, top = 0, w = W, h = H;
+  if (t && !t.classList.contains('hidden')) {
+    const tw = t.offsetWidth, th = t.offsetHeight;
+    if (tw < W * .5 && th > H * .5) { left = tw; w = W - tw; }   // coluna lateral
+    else h = H - th;                                             // faixa inferior
+  }
+  return { left, top, w, h, cx: w / 2, cy: h / 2 };
+}
 function fitBoard() {
-  const wrap = $('#board-wrap').getBoundingClientRect();
-  const tray = $('#tray').classList.contains('hidden') ? 0 : $('#tray').offsetHeight;
-  const z = Math.max(.05, Math.min((wrap.width - 34) / STAGE.w, (wrap.height - tray - 30) / STAGE.h));
+  const a = viewArea();
+  const z = Math.max(.05, Math.min((a.w - 34) / STAGE.w, (a.h - 30) / STAGE.h));
   VIEW.z = z; VIEW.tx = 0; VIEW.ty = 0;
   applyView();
 }
-/** zoom em torno de um ponto (px relativo à área do quadro) */
+/** zoom em torno de um ponto (px relativo ao #board-wrap) */
 function zoomBy(f, cx, cy) {
-  const wrap = $('#board-wrap').getBoundingClientRect();
+  const a = viewArea();
   const nx = clamp(VIEW.z * f, .08, 4);
-  const dx = (cx === undefined ? wrap.width / 2 : cx) - wrap.width / 2 - VIEW.tx;
-  const dy = (cy === undefined ? wrap.height / 2 : cy) - wrap.height / 2 - VIEW.ty;
+  const px = cx === undefined ? a.cx : cx - a.left;
+  const py = cy === undefined ? a.cy : cy - a.top;
+  const dx = px - a.cx - VIEW.tx;
+  const dy = py - a.cy - VIEW.ty;
   VIEW.tx -= dx * (nx / VIEW.z - 1);
   VIEW.ty -= dy * (nx / VIEW.z - 1);
   VIEW.z = nx;
@@ -1020,13 +1255,12 @@ function focusTerminals(a, b) {
   const A = TERM_POS[a] || TERM_POS[b], B = TERM_POS[b] || TERM_POS[a];
   if (!A || !B) return;
   const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
-  const wrap = $('#board-wrap').getBoundingClientRect();
-  const tray = $('#tray').classList.contains('hidden') ? 0 : $('#tray').offsetHeight;
-  const z = clamp(Math.min(wrap.width / (Math.abs(A.x - B.x) + 520),
-    (wrap.height - tray) / (Math.abs(A.y - B.y) + 360)), .28, 1.35);
+  const area = viewArea();
+  const z = clamp(Math.min(area.w / (Math.abs(A.x - B.x) + 520),
+    area.h / (Math.abs(A.y - B.y) + 360)), .28, 1.35);
   VIEW.z = z;
   VIEW.tx = (STAGE.w / 2 - mx) * z;
-  VIEW.ty = (STAGE.h / 2 - my) * z - tray * .18;
+  VIEW.ty = (STAGE.h / 2 - my) * z;
   applyView();
   [a, b].forEach(k => {
     const t = $(`.term[data-term="${k}"]`);
@@ -1091,14 +1325,17 @@ function celebrate() {
   const t = $('#hud-time').textContent;
   $('#modal-title').textContent = 'Quadro montado e testado!';
   $('#modal-body').innerHTML = `<div class="cert">
-      <p>Você montou e operou o comando de motor trifásico com reversão
-         <b>seguindo o esquema elétrico</b>: potência, comando e sinalização,
-         mais a sequência de funcionamento (frente, parada, ré, sobrecarga e rearme).</p>
+      <p>${VFD
+      ? 'Você montou e comissionou um quadro com <b>inversor de frequência CFW 500</b>: ramal de potência com contator de linha, '
+      + 'comando em 24 V pelas entradas digitais, referência por potenciômetro e proteção pela falha do drive.'
+      : 'Você montou e operou o comando de motor trifásico com reversão <b>seguindo o esquema elétrico</b>: '
+      + 'potência, comando e sinalização, mais a sequência de funcionamento (frente, parada, ré, sobrecarga e rearme).'}</p>
       <div class="big">${S.score} pts</div>
       <p>Tempo: <b>${t}</b> · Ligações: <b>${S.wires.length}</b> · Tentativas erradas: <b>${S.errors}</b></p>
-      <p style="color:#9fb6c9;font-size:13px">Desafios extras: monte sem o intertravamento (11-12 cruzados) e veja
-         o curto-circuito; troque entre si as fases da saída do K2 (2 e 6) e confira a rotação invertida.</p>
-      <button class="btn" onclick="window.print()">🖨 Imprimir</button>
+      <p style="color:#9fb6c9;font-size:13px">${VFD
+      ? 'Desafios extras: tire o fio do DI3 (habilitação) e veja o drive ficar em READY; inverta duas fases na saída do inversor e confira o motor girando ao contrário.'
+      : 'Desafios extras: monte sem o intertravamento (11-12 cruzados) e veja o curto-circuito; troque entre si as fases da saída do K2 (2 e 6) e confira a rotação invertida.'}</p>
+      <button class="btn" onclick="window.print()">Imprimir laudo</button>
     </div>`;
   $('#modal').classList.remove('hidden');
   SFX.ok();
@@ -1106,30 +1343,33 @@ function celebrate() {
 
 /* --------------------------------- modais --------------------------------- */
 function showSchematic() {
-  $('#modal-title').textContent = 'Esquema elétrico de referência';
+  const p = PROJECT;
+  const imgs = p.schematic && p.schematic.imgs;
+  /* legenda dos componentes da missão */
+  const legend = PARTS.map(x => `<div><b>${x.id}</b> — ${x.name}${x.sub ? ` · ${x.sub}` : ''}</div>`).join('');
+  /* lista técnica: as ligações da missão, na ordem do projeto */
+  let lastSec = null;
+  const lista = MISSIONS.map(m => {
+    let head = '';
+    if (m.sec !== lastSec) { lastSec = m.sec; head = `<div class="sec-head">${SECTIONS[m.sec] || m.sec}</div>`; }
+    return head + `<div class="wirelb row"><code>${m.a}</code>
+      <svg class="ic"><use href="#i-arrow"/></svg><code>${m.b}</code>
+      <span class="hint">${m.hint}</span></div>`;
+  }).join('');
+  const params = p.parametros ? `
+    <h4 class="helph4">Parametrização do inversor (conferir no manual do CFW 500)</h4>
+    <div class="ptable">${p.parametros.map(([par, nome, val]) =>
+    `<div><b>${par}</b><span>${nome}</span><em>${val}</em></div>`).join('')}</div>` : '';
+  $('#modal-title').textContent = `${p.missao} — referência elétrica`;
   $('#modal-body').innerHTML = `
-    <p style="color:#9fb6c9;font-size:13px;margin-top:0">
-      Comando de motor trifásico com reversão de rotação (Frente/Ré) — proteção por relé térmico e sinalização luminosa.
-      Use estas imagens como referência para todas as ligações.</p>
-    <img class="schem" src="assets/esquema-1.jpg" alt="Esquema elétrico">
-    <div class="legend">
-      ${[['Q1', 'Chave seccionadora / disjuntor da potência (3 polos)'],
-      ['Q2', 'Disjuntor do circuito de comando (1 ou 2 polos)'],
-      ['K1', 'Contator de sentido frente'],
-      ['K2', 'Contator de sentido ré'],
-      ['F1', 'Relé térmico — proteção contra sobrecarga'],
-      ['M3', 'Motor trifásico'],
-      ['S0', 'Botão de parada (NF)'], ['S1', 'Botão de partida frente (NA)'],
-      ['S2', 'Botão de partida ré (NA)'],
-      ['13-14', 'Contato auxiliar NA (auto-retenção)'],
-      ['11-12', 'Contato auxiliar NF (intertravamento)'],
-      ['95-96', 'Contato NF do relé térmico'], ['97-98', 'Contato NA do relé térmico'],
-      ['A1/A2', 'Bobina do contator'],
-      ['H1…H4', 'Lâmpadas de sinalização (AM SC falha / VM MD motor parado / VD ML frente / VD 2R ré)'],
-      ['RET', 'Barra de retorno do comando — vem da saída 2 do Q2 (polo 1, fase L1)']]
-      .map(([a, b]) => `<div><b>${a}</b> — ${b}</div>`).join('')}
-    </div>
-    <img class="schem" style="margin-top:14px" src="assets/esquema-2.jpg" alt="Poster do esquema">`;
+    <p class="tinyp"><b>${p.titulo}.</b> ${p.resumo}</p>
+    ${imgs ? `<img class="schem" src="${imgs[0]}" alt="Esquema elétrico">` : ''}
+    ${params}
+    <h4 class="helph4">Componentes do quadro</h4>
+    <div class="legend">${legend}</div>
+    <h4 class="helph4">Ligações do projeto</h4>
+    <div class="wlist">${lista}</div>
+    ${imgs && imgs[1] ? `<img class="schem" style="margin-top:14px" src="${imgs[1]}" alt="Poster do esquema">` : ''}`;
   $('#modal').classList.remove('hidden');
 }
 
@@ -1162,9 +1402,13 @@ function verify() {
   if (S.res.short) rows.push(`<div class="check err">Curto-circuito: duas fases no mesmo ponto (ou fase direto no neutro).</div>`);
   if (!S.res.short && missing.length === 0) {
     rows.push(`<div class="check ok">Circuito elétrico coerente com o esquema. 🎯</div>`);
-    rows.push(`<div class="check">Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> → K1 (frente) e a verde VD ML acende;
-      <b>S2</b> → K2 (ré) e a verde VD 2R acende; <b>S0</b> desliga tudo e acende a VM MD (motor parado).
-      O relé térmico só atua em sobrecarga, aí acende a AM SC.</div>`);
+    rows.push(`<div class="check">${VFD
+      ? 'Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> fecha o contator K1 e dá partida no inversor (DI1); '
+      + 'o <b>potenciômetro</b> dá a velocidade; <b>S2</b> troca o sentido (DI4); <b>S0</b> para tudo. '
+      + 'Na sobrecarga o drive atua (F051), o relé RL1 derruba o K1 e acende a AM SC.'
+      : 'Teste de funcionamento: com Q1 e Q2 ligados, <b>S1</b> → K1 (frente) e a verde VD ML acende; '
+      + '<b>S2</b> → K2 (ré) e a verde VD 2R acende; <b>S0</b> desliga tudo e acende a VM MD (motor parado). '
+      + 'O relé térmico só atua em sobrecarga, aí acende a AM SC.'}</div>`);
   }
   $('#modal-title').textContent = 'Verificação da montagem';
   $('#modal-body').innerHTML = rows.join('');
@@ -1205,7 +1449,8 @@ function autoMount() {
 function resetAll() {
   S.etapa = 1; S.placed = {}; S.wires = []; S.q1 = S.q2 = false;
   S.pressed = { S0: false, S1: false, S2: false };
-  S.f1Tripped = false; S.sel = null; S.score = 0; S.errors = 0;
+  S.f1Tripped = false; S.driveFault = false; S.ref = 0.5;
+  S.sel = null; S.score = 0; S.errors = 0;
   S.free = false; $('#btn-livre').classList.remove('on');
   S.mode = 'esquema'; S.defect = null; S._fixed = false; S._repairs = 0;
   METER.on = false; METER.a = METER.b = null; S._reading = null;
@@ -1223,26 +1468,106 @@ function resetAll() {
   $('#tray-count').textContent = `0 / ${PARTS.length}`;
   activateTab('tarefas');
   SFX.humOff();
-  buildGhosts(); buildTray(); renderMissions(); renderTests(); paintMeter(); refresh(); fitBoard();
+  buildDock(); buildGhosts(); buildTray();
+  renderMissions(); renderTests(); paintMeter(); refresh(); fitBoard();
   coachShow('Etapa 1 — Fixar componentes', 'Arraste cada componente da caixa para o contorno tracejado na placa.');
+}
+
+/* ============================================================================
+   BANCADA — montada a partir da missão. Cada projeto declara em data.js os
+   interruptores, botões, tipo de proteção (relé térmico ou falha do inversor),
+   painel do drive e potenciômetro. Isso mantém o M1 e o M2 no mesmo código.
+   ========================================================================== */
+function buildDock() {
+  const b = PROJECT.bench;
+  const sw = b.switches.map(s => `<button id="ctl-${s.id}" class="key">${s.label} <b>OFF</b></button>`).join('');
+  const btns = b.buttons.map(x =>
+    `<button id="ctl-${x.id}" class="pbtn ${x.cls}" data-pbtn="${x.name}">${x.name}<b>${x.sub}</b></button>`).join('');
+  const prot = b.protection === 'f1'
+    ? '<button id="ctl-f1" class="key">F1 <b>REARMAR</b></button>'
+    : '<button id="ctl-reset" class="key">RESET <b>F051</b></button>';
+  const drive = b.drive ? `
+    <div class="dock-group">
+      <span class="dock-title">Painel do inversor</span>
+      <div class="drv">
+        <div class="drv-disp"><span id="drv-hz-2">000.0</span><small>Hz</small>
+          <em id="drv-st-2" class="drv-st" data-k="off">OFF</em></div>
+        <div class="drv-leds"><i id="di-di1">DI1</i><i id="di-di2">DI2</i><i id="di-di3">DI3</i><i id="di-di4">DI4</i></div>
+      </div>
+    </div>` : '';
+  const pot = b.pot ? `
+    <div class="dock-group">
+      <span class="dock-title">Referência · RP1</span>
+      <input id="ctl-pot" class="pot" type="range" min="0" max="100" value="${Math.round(S.ref * 100)}" aria-label="Potenciômetro de referência">
+      <span id="drv-ref" class="ro-mini">${Math.round(S.ref * 100)} %</span>
+    </div>` : '';
+  $('#dock').innerHTML =
+    `<div class="dock-group"><span class="dock-title">Alimentação</span>${sw}</div>` +
+    `<div class="dock-group"><span class="dock-title">Comando</span>${btns}</div>` +
+    `<div class="dock-group"><span class="dock-title">Proteção e carga</span>${prot}
+       <select id="ctl-load" title="Carga do motor">
+         <option value="sem">Sem carga</option>
+         <option value="nominal" selected>Carga nominal</option>
+         <option value="sobrecarga">Sobrecarga</option>
+       </select></div>` + drive + pot +
+    `<div class="dock-group readout-group"><span class="dock-title">Leitura</span>
+       <div class="readout">
+         <span id="ro-voltage" class="ro">—</span>
+         <span id="ro-msg" class="ro msg">Ligue Q1 e Q2 para energizar o quadro.</span>
+       </div></div>`;
+  bindDock();
+}
+
+function bindDock() {
+  const b = PROJECT.bench;
+  b.switches.forEach(s => {
+    const el = $('#ctl-' + s.id);
+    if (!el) return;
+    el.onclick = () => { S[s.id] = !S[s.id]; SFX.clack(); refresh(); };
+  });
+  $('#ctl-load').onchange = e => { S.load = e.target.value; S.overload = 0; };
+  if (b.protection === 'f1') {
+    $('#ctl-f1').onclick = () => {
+      if (!S.f1Tripped) { logMsg('warn', 'O relé térmico não está atuado.'); return; }
+      S.f1Tripped = false; SFX.clack(); logMsg('ok', 'Relé térmico rearmado (95-96 fechado).'); refresh();
+    };
+  } else {
+    $('#ctl-reset').onclick = () => {
+      const emFalha = S.driveFault || !!(S.res && S.res.dev && S.res.dev.fault);
+      if (!emFalha) { logMsg('warn', 'O inversor não está em falha.'); return; }
+      S.driveFault = false; S.overload = 0; S.load = 'nominal';
+      const sel = $('#ctl-load'); if (sel) sel.value = 'nominal';
+      SFX.clack();
+      logMsg('ok', 'Falha do inversor rearmada. O RL1 volta ao repouso — um novo toque no S1 parte o motor.');
+      refresh();
+    };
+  }
+  b.buttons.forEach(x => {
+    const el = $('#ctl-' + x.id);
+    el.addEventListener('pointerdown', e => { e.preventDefault(); pressButton(x.name, true); });
+    el.addEventListener('pointerup', () => pressButton(x.name, false));
+    el.addEventListener('pointerleave', () => pressButton(x.name, false));
+  });
+  const pot = $('#ctl-pot');
+  if (pot) pot.oninput = e => { S.ref = (+e.target.value) / 100; refresh(); };
+}
+
+/** proteção que desliga o motor por sobrecarga: relé térmico ou falha F051 */
+function tripProtection(reason) {
+  if (PROJECT.bench.trip === 'drive') {
+    if (S.driveFault) return;
+    S.driveFault = true;
+    SFX.clack();
+    logMsg('err', 'F051 — sobrecorrente no inversor. O relé RL1 comuta, o NF abre e o contator K1 cai com o motor.');
+    logMsg('warn', 'Reduza a carga e aperte RESET no painel do inversor para rearmar.');
+    refresh();
+    return;
+  }
+  tripF1(reason || 'sobrecarga do motor');
 }
 
 /* ------------------------------- controles -------------------------------- */
 function bindUI() {
-  $('#ctl-q1').onclick = () => { S.q1 = !S.q1; SFX.clack(); refresh(); };
-  $('#ctl-q2').onclick = () => { S.q2 = !S.q2; SFX.clack(); refresh(); };
-  $('#ctl-f1').onclick = () => {
-    if (!S.f1Tripped) { logMsg('warn', 'O relé térmico não está atuado.'); return; }
-    S.f1Tripped = false; SFX.clack(); logMsg('ok', 'Relé térmico rearmado (95-96 fechado).'); refresh();
-  };
-  $('#ctl-load').onchange = e => { S.load = e.target.value; S.overload = 0; };
-
-  [['S0', '#ctl-s0'], ['S1', '#ctl-s1'], ['S2', '#ctl-s2']].forEach(([n, sel]) => {
-    const el = $(sel);
-    el.addEventListener('pointerdown', e => { e.preventDefault(); pressButton(n, true); });
-    el.addEventListener('pointerup', () => pressButton(n, false));
-    el.addEventListener('pointerleave', () => pressButton(n, false));
-  });
 
   // apertar os botões direto na placa (um toque = impulso momentâneo)
   document.addEventListener('click', e => {
@@ -1306,12 +1631,19 @@ function bindUI() {
     if (S.free && S.etapa === 3) logMsg('warn', 'Modo livre: você pode alterar a fiação montada.');
   };
   $('#btn-auto').onclick = autoMount;
+  if ($('#btn-missoes')) $('#btn-missoes').onclick = showMissionSelect;
+  if ($('#mselect-x')) $('#mselect-x').onclick = () => $('#mselect').classList.add('hidden');
+  if ($('#mselect-free')) $('#mselect-free').onclick = () => $('#mselect').classList.add('hidden');
   $('#btn-reset').onclick = () => {
     if (confirm('Recomeçar a montagem do zero?')) resetAll();
   };
   $('#btn-pular').onclick = () => PARTS.forEach(p => placePart(p.id));
   $('#btn-panel').onclick = () => openSidebar(!$('#sidebar').classList.contains('open'));
-  $('#coach-x').onclick = () => $('#coach').classList.add('hidden');
+  $('#coach-x').onclick = hideCoach;
+  /* encostar na placa já fecha o aviso: ele nunca fica no caminho da montagem */
+  $('#board-wrap').addEventListener('pointerdown', e => {
+    if (!e.target.closest('#coach')) hideCoach();
+  });
   $('#modal-x').onclick = () => $('#modal').classList.add('hidden');
   $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').classList.add('hidden'); };
 
@@ -1366,9 +1698,58 @@ function tick() {
   const running = S.res && S.res.motor.state === 'girando' && !S.short;
   if (running && S.load === 'sobrecarga') {
     S.overload += 100;
-    if (S.overload % 1000 < 100) logMsg('warn', `Corrente alta... relé térmico aquecendo (${(S.overload / 1000).toFixed(1)}s)`);
-    if (S.overload > 3200) tripF1('sobrecarga do motor');
+    const seg = (S.overload / 1000).toFixed(1);
+    if (S.overload % 1000 < 100) logMsg('warn', PROJECT.bench.trip === 'drive'
+      ? `Corrente alta... proteção eletrônica do inversor contando (${seg}s)`
+      : `Corrente alta... relé térmico aquecendo (${seg}s)`);
+    if (S.overload > 3200) tripProtection('sobrecarga do motor');
   } else if (!running) S.overload = 0;
+}
+
+/* ============================================================================
+   MISSÕES — seletor de serviço e troca de quadro
+   ========================================================================== */
+function buildMissionSelect() {
+  $('#mselect-list').innerHTML = Object.values(PROJECTS).map(p => `
+    <article class="mcard" data-proj="${p.id}">
+      <span class="eyebrow">${p.missao} · nível ${p.nivel}</span>
+      <h2>${p.nome}</h2>
+      <p class="mlead">${p.titulo}</p>
+      <p class="mres">${p.resumo}</p>
+      <dl class="mspec">
+        <div><dt>Aplicação</dt><dd>${p.aplicacao}</dd></div>
+        <div><dt>Escopo</dt><dd>${p.parts.length} componentes · ${p.missions.length} ligações</dd></div>
+        <div><dt>Duração</dt><dd>${p.duracao}</dd></div>
+      </dl>
+      <ul class="mentregas">${p.entregas.map(e => `<li>${e}</li>`).join('')}</ul>
+      <div class="macts">
+        <button class="btn primary" data-start="${p.id}">Iniciar montagem</button>
+        <button class="btn ghost" data-manut="${p.id}">Ordem de serviço</button>
+      </div>
+    </article>`).join('');
+  $$('#mselect-list [data-start]').forEach(b => b.onclick = () => startProject(b.dataset.start));
+  $$('#mselect-list [data-manut]').forEach(b => b.onclick = () => startProject(b.dataset.manut, 'manutencao'));
+}
+
+function showMissionSelect() {
+  buildMissionSelect();
+  $('#mselect').classList.remove('hidden');
+}
+
+/** troca de missão: recarrega dados, simulação, roteador, placa e bancada */
+function startProject(id, modo) {
+  applyProject(id);            // data.js — peças, missões, testes, defeitos
+  simInit();                   // sim.js — índices de bornes e fontes
+  rebuildTermIndex();          // app.js — posição e direção dos bornes
+  buildRouteMap();             // roteador — novo mapa de obstáculos
+  S.projId = id;
+  document.body.dataset.proj = id;
+  $('#brand-title').textContent = PROJECT.nome;
+  $('#brand-sub').textContent = PROJECT.titulo;
+  $('#mselect').classList.add('hidden');
+  resetAll();
+  logMsg('ok', `${PROJECT.missao} — ${PROJECT.titulo}.`);
+  if (modo === 'manutencao') startMaintenance(null);
 }
 
 /* --------------------------------- init ----------------------------------- */
@@ -1378,7 +1759,9 @@ function init() {
   st.textContent = '@keyframes spin{to{transform:rotate(360deg)}}';
   document.head.appendChild(st);
 
+  buildRouteMap();
   buildPaint();
+  buildDock();          // bancada do projeto ativo (interruptores, botões, painel do drive)
   buildGhosts();
   buildTray();
   renderMissions();
@@ -1392,8 +1775,13 @@ function init() {
   logMsg('ok', 'Bem-vindo! Monte o quadro seguindo o esquema elétrico. Abra "Esquema" para ver o diagrama.');
   setInterval(tick, 100);
 
-  // modo de inspeção: index.html?view=1 (tudo montado) | &z=1.2&tx=0&ty=0 (zoom num trecho)
+  /* link direto para uma missão: index.html?m=inversor */
   const q = new URLSearchParams(location.search);
+  const alvo = q.get('m');
+  if (alvo && PROJECTS[alvo]) startProject(alvo);
+  else if (!q.has('view')) showMissionSelect();
+
+  // modo de inspeção: index.html?view=1 (tudo montado) | &z=1.2&tx=0&ty=0 (zoom num trecho)
   if (q.has('view')) {
     fitBoard = () => { };
     PARTS.forEach(p => placePart(p.id));

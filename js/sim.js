@@ -1,12 +1,15 @@
 /* ============================================================================
-   sim.js — "motor de simulação" do quadro elétrico.
-   Constrói os nós elétricos (union-find) a partir dos fios montados e do
-   estado dos contatos, e resolve bobinas / lâmpadas / motor por ponto fixo.
+   sim.js — "motor de simulação" do quadro.
+   Monta os nós elétricos (union-find) a partir dos fios montados, dos contatos
+   internos (declarados em data.js) e do estado da bancada; resolve bobinas,
+   lâmpadas, motor e o inversor por ponto fixo.
 
-   O retorno do comando NÃO é neutro: o esquema alimenta as bobinas e as
-   lâmpadas entre duas FASES (L2 pelo polo 2 do Q2 e L1 pelo polo 1). Por isso
-   a regra de "carga energizada" aqui é: dois bornes em potenciais DIFERENTES
-   (fase-fase, ou fase-neutro caso exista um neutro na montagem).
+   Potenciais: cada projeto declara as suas FONTES (L1/L2/L3 e, quando existe,
+   a fonte de 24 V do inversor). Uma carga (bobina, lâmpada) está energizada
+   quando os dois bornes caem em nós DIFERENTES, ambos com potencial, e os
+   potenciais não são iguais — é assim que funciona tanto o comando em 380 V
+   (fase x fase, sem neutro, como no esquema) quanto o comando em 24 V do
+   inversor (fonte interna: +24 V x COM).
    ========================================================================== */
 
 /* ---------------- utilidades ---------------- */
@@ -23,7 +26,7 @@ function matchTerm(key, pattern) {
 /** true se {a,b} casa com a missão (em qualquer ordem) */
 function missionMatches(m, a, b) {
   return (matchTerm(a, m.a) && matchTerm(b, m.b)) ||
-         (matchTerm(a, m.b) && matchTerm(b, m.a));
+    (matchTerm(a, m.b) && matchTerm(b, m.a));
 }
 
 /* ---------------- union-find ---------------- */
@@ -38,179 +41,260 @@ function makeDSU() {
   return { find, union };
 }
 
-/* Todos os terminais existentes: "PART:TERM" */
-const ALL_TERMS = [];
-PARTS.forEach(p => p.terms.forEach(t => ALL_TERMS.push(p.id + ':' + t.id)));
-const ALL_TERM_SET = new Set(ALL_TERMS);
+/* ---------------- derivados do projeto ativo ---------------- */
+/* (recalculados por simInit() sempre que applyProject() troca a missão) */
+let ALL_TERMS = [], ALL_TERM_SET = new Set(), PART_BY_ID = {};
 
-const PART_BY_ID = {};
-PARTS.forEach(p => { PART_BY_ID[p.id] = p; });
+function simInit() {
+  ALL_TERMS = [];
+  PARTS.forEach(p => p.terms.forEach(t => ALL_TERMS.push(p.id + ':' + t.id)));
+  ALL_TERM_SET = new Set(ALL_TERMS);
+  PART_BY_ID = {};
+  PARTS.forEach(p => { PART_BY_ID[p.id] = p; });
+}
+
+/** índice da fonte (L1/L2/L3/V24/V0) que alimenta um terminal, ou null */
+function sourceOf(key) {
+  for (const s in SOURCES) if (SOURCES[s].includes(key)) return s;
+  return null;
+}
+
+const setsEqual = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
 
 /* ---------------- construção da rede ---------------- */
 function buildNets(state, wires, coils) {
   const dsu = makeDSU();
 
-  // garante que existam todos os terminais
   ALL_TERMS.forEach(t => dsu.find(t));
 
-  // relé térmico: os contatos de potência conduzem (são só um caminho em série)
-  INTERNAL.F1_power.forEach(([a, b]) => dsu.union(a, b));
+  // partes internas fixas (ex.: contatos de potência do relé térmico)
+  (INTERNAL.statics || []).forEach(([a, b]) => dsu.union(a, b));
+  // barra de retorno: todos os bornes são o mesmo ponto elétrico
+  (INTERNAL.buses || []).forEach(bus => bus.forEach(t => dsu.union(bus[0], t)));
 
-  // barra de retorno: um único ponto elétrico
-  const ret = INTERNAL.RET;
-  ret.forEach(t => dsu.union(ret[0], t));
-
-  // Q1 — chave seccionadora tripolar
-  if (state.q1) [['1', '2'], ['3', '4'], ['5', '6']].forEach(([a, b]) => dsu.union('Q1:' + a, 'Q1:' + b));
-
-  // Q2 — disjuntor do comando (bipolar)
-  if (state.q2) [['1', '2'], ['3', '4']].forEach(([a, b]) => dsu.union('Q2:' + a, 'Q2:' + b));
-
-  // contatores K1 / K2
-  //  13-14 = NA da auto-retenção · 23-24 = NA da sinalização da marcha
-  //  11-12 = NF do intertravamento · 21-22 = NF da sinalização (motor parado)
-  ['K1', 'K2'].forEach(k => {
-    if (coils[k]) {
-      [['1', '2'], ['3', '4'], ['5', '6'], ['13', '14'], ['23', '24']]
-        .forEach(([a, b]) => dsu.union(k + ':' + a, k + ':' + b));
-    } else {
-      dsu.union(k + ':11', k + ':12');   // NF de intertravamento fechado (K desligado)
-      dsu.union(k + ':21', k + ':22');   // NF da sinalização fechado (K desligado)
-    }
+  /* contatos que dependem da bancada / das bobinas.
+     O contexto carrega os dois jeitos de ler a bancada usados em data.js:
+     direto (s.q1, s.pressed.S0) e agrupado (c.coils.K1). */
+  const ctx = Object.assign({}, state, { state, coils, net: null });
+  RULES.forEach(r => {
+    if (r.when(ctx)) (r.close || []).forEach(([a, b]) => dsu.union(a, b));
   });
-
-  // botão de parada S0 (NF — abre quando apertado)
-  if (!state.pressed.S0) dsu.union('S0:11', 'S0:12');
-
-  // botões NA (fecham quando apertados)
-  if (state.pressed.S1) dsu.union('S1:13', 'S1:14');
-  if (state.pressed.S2) dsu.union('S2:13', 'S2:14');
-
-  // relé térmico — contatos auxiliares
-  if (state.f1Tripped) dsu.union('F1:97', 'F1:98');  // NA fecha → lâmpada de falha
-  else dsu.union('F1:95', 'F1:96');                  // NF fechado → comando vivo
 
   // fios montados pelo jogador
   wires.forEach(w => {
     if (ALL_TERM_SET.has(w.a) && ALL_TERM_SET.has(w.b)) dsu.union(w.a, w.b);
   });
 
-  // agrupa
+  let nets = groupNets(dsu);
+  let netOf = toNetOf(nets);
+  let dev = null;
+
+  /* ---- inversor de frequência: relé de saída e caminho de potência ---- */
+  if (VFD) {
+    // o inversor lê as entradas digitais e as fases na rede já montada
+    dev = vfdInfo({ nets, netOf }, coils, state);
+    if (dev.fault) dsu.union(VFD.relay.c, VFD.relay.na);
+    else dsu.union(VFD.relay.c, VFD.relay.nf);
+    if (dev.run) {
+      const [r, s, t] = VFD.power.in, [u, v, w] = VFD.power.out;
+      const map = dev.rev ? [[r, w], [s, v], [t, u]] : [[r, u], [s, v], [t, w]];
+      map.forEach(([x, y]) => dsu.union(x, y));
+    }
+    nets = groupNets(dsu);                          // reagrupa com o inversor dentro
+    netOf = toNetOf(nets);
+    dev = vfdInfo({ nets, netOf }, coils, state);   // estado final (para o painel)
+  }
+
+  return { dsu, nets, netOf, dev };
+}
+
+/** índice terminal → nó, para consultar potencial de um borne */
+function toNetOf(nets) {
+  const netOf = {};
+  nets.forEach(n => n.terms.forEach(t => { netOf[t] = n; }));
+  return netOf;
+}
+
+/** agrupa os terminais em nós e marca as fontes presentes em cada nó */
+function groupNets(dsu) {
   const nets = new Map();
   ALL_TERMS.forEach(t => {
     const r = dsu.find(t);
     let n = nets.get(r);
-    if (!n) { n = { root: r, terms: [], phases: new Set(), hasN: false, hasLive: false }; nets.set(r, n); }
+    if (!n) { n = { root: r, terms: [], phases: new Set(), srcs: new Set() }; nets.set(r, n); }
     n.terms.push(t);
-    if (t === 'ENT:L1') n.phases.add(1);
-    if (t === 'ENT:L2') n.phases.add(2);
-    if (t === 'ENT:L3') n.phases.add(3);
-    if (t === 'ENT:N') n.hasN = true;
+    const s = sourceOf(t);
+    if (s) {
+      n.srcs.add(s);
+      if (s === 'L1') n.phases.add(1);
+      if (s === 'L2') n.phases.add(2);
+      if (s === 'L3') n.phases.add(3);
+    }
   });
-
-  const netOf = {};
-  nets.forEach(n => n.terms.forEach(t => { netOf[t] = n; }));
-
-  return { dsu, nets, netOf };
+  return nets;
 }
 
 /* ---------------- simulação completa ---------------- */
 function solve(state, wires, prev) {
-  // parte do estado anterior: é isso que dá a histerese dos contatores
-  // (auto-retenção pelo contato 13-14 e intertravamento pelo NF 11-12)
-  let coils = { K1: !!(prev && prev.K1), K2: !!(prev && prev.K2) };
-  let net = buildNets(state, wires, coils);
+  const ids = COILS.map(c => c.id);
+  let coils = {};
+  ids.forEach(id => { coils[id] = !!(prev && prev[id]); });
 
-  // ponto fixo: bobina energizada fecha os contatos, que podem energizar outra bobina
-  for (let i = 0; i < 10; i++) {
-    const next = {
-      K1: coilOn(net, 'K1'),
-      K2: coilOn(net, 'K2'),
-    };
-    if (next.K1 === coils.K1 && next.K2 === coils.K2) break;
+  let net = buildNets(state, wires, coils);
+  // ponto fixo: bobina energizada fecha contatos, que podem energizar outra
+  for (let i = 0; i < 14; i++) {
+    const next = {};
+    COILS.forEach(c => { next[c.id] = c.fn ? !!c.fn(net, coils, state) : energized(net, c.a, c.b); });
+    const igual = ids.every(id => next[id] === coils[id]);
     coils = next;
     net = buildNets(state, wires, coils);
+    if (igual) break;
   }
 
-  const res = { coils, net, faults: [], motor: { state: 'parado', dir: 0 }, lamps: {}, diagnostics: [] };
+  const res = {
+    coils, net, dev: net.dev, faults: [],
+    motor: { state: 'parado', dir: 0, hz: 0 }, lamps: {}, diagnostics: [],
+  };
 
-  // curto-circuito: duas fases no mesmo nó, ou fase direto no neutro
+  // curto-circuito: duas fases no mesmo nó, ou fonte lógica em curto
   net.nets.forEach(n => {
     if (n.phases.size >= 2) res.faults.push({ type: 'curto-fase-fase', net: n });
-    else if (n.phases.size === 1 && n.hasN) res.faults.push({ type: 'curto-fase-neutro', net: n });
+    else if (n.srcs.has('V24') && n.srcs.has('V0')) res.faults.push({ type: 'curto-fonte-24v', net: n });
   });
   res.short = res.faults.length > 0;
 
   // lâmpadas
-  ['H1', 'H2', 'H3', 'H4'].forEach(h => {
-    res.lamps[h] = energized(net, h + ':X1', h + ':X2');
-  });
+  LAMPS.forEach(l => { res.lamps[l.id] = energized(net, l.a, l.b); });
 
   // motor
-  const { u, v, w } = motorPhases(net);
-  const powered = [u, v, w].filter(p => p !== null).length;
-  if (powered === 0) res.motor.state = 'parado';
-  else if (powered < 3) res.motor.state = 'falta-fase';
-  else {
-    const forward = ((v - u + 3) % 3 === 1) && ((w - v + 3) % 3 === 1);
-    const reverse = ((u - v + 3) % 3 === 1) && ((v - w + 3) % 3 === 1);
-    if (forward) { res.motor.state = 'girando'; res.motor.dir = 1; }
-    else if (reverse) { res.motor.state = 'girando'; res.motor.dir = -1; }
-    else { res.motor.state = 'falta-fase'; }
+  if (VFD) {
+    /* o sentido continua vindo da SEQUÊNCIA DE FASES que chega em U/V/W —
+       assim um cabo trocado na saída aparece como motor girando ao contrário,
+       igual à instalação de verdade. A frequência vem do inversor. */
+    const d = net.dev;
+    const { u, v, w } = motorPhases(net);
+    const ligado = [u, v, w].every(p => p !== null);
+    if (!d.run) res.motor.state = 'parado';
+    else if (d.ref <= 0.001) res.motor.state = 'sem-ref';    // em RUN, mas sem referência de velocidade
+    else if (!ligado) res.motor.state = 'falta-fase';
+    else {
+      const forward = ((v - u + 3) % 3 === 1) && ((w - v + 3) % 3 === 1);
+      const reverse = ((u - v + 3) % 3 === 1) && ((v - w + 3) % 3 === 1);
+      res.motor.state = 'girando';
+      res.motor.dir = forward ? 1 : (reverse ? -1 : 0);
+      res.motor.hz = d.hz;
+      if (!res.motor.dir) res.motor.state = 'falta-fase';
+    }
+  } else {
+    const { u, v, w } = motorPhases(net);
+    const powered = [u, v, w].filter(p => p !== null).length;
+    if (powered === 0) res.motor.state = 'parado';
+    else if (powered < 3) res.motor.state = 'falta-fase';
+    else {
+      const forward = ((v - u + 3) % 3 === 1) && ((w - v + 3) % 3 === 1);
+      const reverse = ((u - v + 3) % 3 === 1) && ((v - w + 3) % 3 === 1);
+      if (forward) { res.motor.state = 'girando'; res.motor.dir = 1; res.motor.hz = 60; }
+      else if (reverse) { res.motor.state = 'girando'; res.motor.dir = -1; res.motor.hz = 60; }
+      else res.motor.state = 'falta-fase';
+    }
   }
 
   res.netOf = net.netOf;
   return res;
 }
 
-function coilOn(net, k) {
-  return energized(net, k + ':A1', k + ':A2');
-}
-
 /**
- * Uma carga (bobina, lâmpada) está energizada quando os seus dois bornes estão
- * em nós DIFERENTES com potenciais ativos e diferentes entre si.
- * No esquema isso é fase-fase (L1 x L2 pelo Q2 bipolar); o neutro também vale
- * caso a montagem tenha um.
+ * Uma carga está energizada quando os seus dois bornes estão em nós DIFERENTES,
+ * ambos com potencial, e os potenciais não são o mesmo (fase x fase, fase x
+ * neutro, ou +24 V x COM no comando do inversor).
  */
 function energized(net, ka, kb) {
+  if (!net || !net.netOf) return false;
   const a = net.netOf[ka], b = net.netOf[kb];
   if (!a || !b || a === b) return false;
+  if (!a.srcs.size || !b.srcs.size) return false;
   const pa = [...a.phases], pb = [...b.phases];
-  const liveA = pa.length > 0 || a.hasN;
-  const liveB = pb.length > 0 || b.hasN;
-  if (!liveA || !liveB) return false;
-  if (a.hasN && b.hasN) return false;                       // dois neutros = sem tensão
-  if (pa.length && pb.length && pa.length === pb.length &&
-      pa.every(p => pb.includes(p))) return false;          // mesma fase dos dois lados
-  return true;
+  if (pa.length && pb.length) {
+    return !(pa.length === pb.length && pa.every(p => pb.includes(p)));   // mesma fase: sem tensão
+  }
+  // um lado é potência e o outro é lógica (24 V): circuitos independentes
+  if (!!pa.length !== !!pb.length) return false;
+  return !setsEqual(a.srcs, b.srcs);
 }
 
 /** fase (1,2,3) presente em cada borne do motor — null se não houver */
 function motorPhases(net) {
-  const one = n => {
-    if (!n || n.phases.size !== 1) return null;
-    return [...n.phases][0];
-  };
+  const one = n => (n && n.phases.size === 1) ? [...n.phases][0] : null;
+  return { u: one(net.netOf[MOTOR.u]), v: one(net.netOf[MOTOR.v]), w: one(net.netOf[MOTOR.w]) };
+}
+
+/* ============================================================================
+   INVERSOR DE FREQUÊNCIA (CFW 500)
+   Modelo reduzido ao que o painel ensina:
+     · habilitação  = DI de parada (NF) + DI de habilitação geral (contato do
+       contator de linha) — sem as duas o drive não arranca;
+     · partida      = impulso na DI de start, com memória interna (comando a
+       3 fios), como a auto-retenção de um contator;   · falha        = proteção eletrônica atuada na bancada (F051), que comuta
+                    o relé RL1 e derruba o contator de linha;
+   · fase faltando= uma ou duas fases na entrada (F022): o drive não parte —
+                    é assim que um cabo de força cortado aparece no painel;
+     · relé RL1     = NF fechado sem falha (derruba o contator na falha) e NA
+       fechado na falha (lâmpada de sinalização);
+     · saída U/V/W  = segue R/S/T quando em RUN; em REV troca duas fases.
+   ========================================================================== */
+function vfdInfo(net, coils, state) {
+  if (!VFD) return null;
+  const di = k => energized(net, VFD.di[k], VFD.com);
+
+  const fases = VFD.power.in.map(t => {
+    const n = net.netOf[t];
+    return (n && n.phases.size === 1) ? [...n.phases][0] : null;
+  });
+  const nF = fases.filter(f => f !== null).length;          // fases na entrada R/S/T
+  const powered = nF === 3 && new Set(fases).size === 3;
+  /* F022: o drive tem uma ou duas fases e não arranca (cabo cortado na entrada).
+     Diferente da falha F051, ele NÃO comuta o relé — sem as três fases ele
+     simplesmente não parte, como na instalação de verdade. */
+  const faseFaltando = nF > 0 && nF < 3;
+
+  const enable = di('enable') && di('stop');
+  const comandado = di('start') || (enable && !!coils.RUN);
+  const fault = !!state.driveFault;
+  const run = enable && comandado && !fault && powered;
+  /* referência de velocidade: o app manda a posição do potenciômetro em
+     state.ref (0..1); sem potenciômetro no projeto a referência é nominal */
+  const ref = Math.max(0, Math.min(1, state.ref != null ? state.ref : 1));
+
   return {
-    u: one(net.netOf['M1:U']),
-    v: one(net.netOf['M1:V']),
-    w: one(net.netOf['M1:W']),
+    powered, enabled: enable, started: comandado, fault, faseFaltando, run,
+    rev: run && di('dir'), ref, hz: run ? ref * (VFD.fmax || 60) : 0,
+    di: { start: di('start'), stop: di('stop'), enable: di('enable'), dir: di('dir') },
+    fases, nF,
   };
 }
 
 /* ---------------- cor do cabo pelo potencial do nó ---------------- */
+/* Paleta do projeto: as fases usam a cor do condutor e o comando em 24 V usa
+   o violeta da fonte interna — dá para ler o circuito inteiro pela cor. */
 const WIRE_COLORS = {
-  L1: '#d8342a', L2: '#1d1d1f', L3: '#2f6fe4',
-  N: '#8b98a8', none: '#4b5563',
+  L1: '#ff7a17',   // L1 — laranja (sunset)
+  L2: '#dadbdf',   // L2 — branco
+  L3: '#a0c3ec',   // L3 — azul (breeze)
+  V24: '#c4b5fd',  // +24 V do inversor — violeta (twilight)
+  V0: '#7d8187',   // COM / 0 V — cinza
+  none: '#4a4d53',
 };
 
 function wireColor(net, key) {
-  const n = net.netOf[key];
+  const n = net && net.netOf && net.netOf[key];
   if (!n) return WIRE_COLORS.none;
   if (n.phases.size === 1) return WIRE_COLORS['L' + [...n.phases][0]];
-  if (n.phases.size === 0 && n.hasN) return WIRE_COLORS.N;
+  if (n.srcs.has('V24')) return WIRE_COLORS.V24;
+  if (n.srcs.has('V0')) return WIRE_COLORS.V0;
   return WIRE_COLORS.none;
 }
 
 const PHASE_NAME = { 1: 'L1', 2: 'L2', 3: 'L3' };
+
+/* o app e as ferramentas trocam de missão com applyProject() + simInit() */
+simInit();
